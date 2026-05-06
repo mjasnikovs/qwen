@@ -3,19 +3,45 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
-MODEL_FILE="${MODEL_FILE:-qwen3-coder-30b-a3b.gguf}"
 HOST_PORT="${HOST_PORT:-8080}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-N_CPU_MOE="${N_CPU_MOE:-44}"
-CTX_SIZE="${CTX_SIZE:-200000}"
+N_CPU_MOE="${N_CPU_MOE:-40}"
+CTX_SIZE="${CTX_SIZE:-128000}" #200000
 CACHE_TYPE_K="${CACHE_TYPE_K:-turbo4}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-turbo3}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 
+# Pick model: env var wins, otherwise prompt from the available .gguf files.
+if [[ -z "${MODEL_FILE:-}" ]]; then
+    mapfile -t available < <(cd models 2>/dev/null && ls -1 *.gguf 2>/dev/null || true)
+    if ((${#available[@]} == 0)); then
+        echo "No .gguf files in models/. Run ./download-model.sh or place a GGUF there." >&2
+        exit 1
+    elif ((${#available[@]} == 1)); then
+        MODEL_FILE="${available[0]}"
+        echo "Using only available model: ${MODEL_FILE}"
+    else
+        if [[ ! -t 0 ]]; then
+            echo "Multiple models in models/ but stdin is not a TTY. Set MODEL_FILE=<name>." >&2
+            printf '  %s\n' "${available[@]}" >&2
+            exit 1
+        fi
+        echo "Available models:"
+        for i in "${!available[@]}"; do
+            printf "  %d) %s\n" $((i + 1)) "${available[$i]}"
+        done
+        read -rp "Select model [1-${#available[@]}]: " choice
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || ((choice < 1 || choice > ${#available[@]})); then
+            echo "Invalid choice: $choice" >&2
+            exit 1
+        fi
+        MODEL_FILE="${available[$((choice - 1))]}"
+    fi
+fi
+
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
-    echo "Run ./download-model.sh or place the GGUF in ./models/" >&2
     exit 1
 fi
 
@@ -31,6 +57,8 @@ docker create \
     --name "${NAME}" \
     --restart=no \
     --gpus all \
+    --memory=24g \
+    --memory-swap=24g \
     --cap-add=IPC_LOCK \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
@@ -48,6 +76,7 @@ docker create \
     --mlock \
     --cache-type-k "${CACHE_TYPE_K}" \
     --cache-type-v "${CACHE_TYPE_V}" \
+    --cache-ram 2048 \
     -c "${CTX_SIZE}" \
     --parallel 1 \
     -b 1024 \
