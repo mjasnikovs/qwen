@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-N_CPU_MOE="${N_CPU_MOE:-40}"
+N_CPU_MOE="${N_CPU_MOE:-41}"
 CTX_SIZE="${CTX_SIZE:-128000}" #200000
 CACHE_TYPE_K="${CACHE_TYPE_K:-turbo4}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-turbo3}"
@@ -57,8 +57,8 @@ docker create \
     --name "${NAME}" \
     --restart=no \
     --gpus all \
-    --memory=24g \
-    --memory-swap=24g \
+    --memory=28g \
+    --memory-swap=28g \
     --cap-add=IPC_LOCK \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
@@ -66,6 +66,8 @@ docker create \
     --network "${NETWORK}" \
     --ip "${STATIC_IP}" \
     -v "$(pwd)/models:/models:ro" \
+    -v "$(pwd)/scripts:/scripts:ro" \
+    --entrypoint /scripts/entrypoint.sh \
     "${IMAGE}" \
     --model "/models/${MODEL_FILE}" \
     --host 0.0.0.0 \

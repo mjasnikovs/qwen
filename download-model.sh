@@ -7,11 +7,11 @@ if [[ -f .env ]]; then
   set -a; source .env; set +a
 fi
 
-HF_REPO="${HF_REPO:-unsloth/Qwen3-VL-32B-Instruct-GGUF}"
-HF_FILE="${HF_FILE:-Qwen3-VL-32B-Instruct-Q4_K_M.gguf}"
-HF_MMPROJ="${HF_MMPROJ:-mmproj-F16.gguf}"
-MODEL_FILE="${MODEL_FILE:-qwen3-vl-32b.gguf}"
-MMPROJ_FILE="${MMPROJ_FILE:-qwen3-vl-32b-mmproj.gguf}"
+HF_REPO="${HF_REPO:-unsloth/Qwen3.6-35B-A3B-GGUF}"
+HF_FILE="${HF_FILE:-Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf}"
+HF_MMPROJ="${HF_MMPROJ:-}"
+MODEL_FILE="${MODEL_FILE:-qwen3.6-35b-a3b-UD-Q4_K_XL.gguf}"
+MMPROJ_FILE="${MMPROJ_FILE:-qwen3.6-35b-a3b-mmproj.gguf}"
 
 mkdir -p models
 
