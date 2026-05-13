@@ -9,9 +9,10 @@ N_CPU_MOE="${N_CPU_MOE:-36}"
 CTX_SIZE="${CTX_SIZE:-128000}" #200000
 CACHE_TYPE_K="${CACHE_TYPE_K:-turbo4}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-turbo3}"
+THINKING="${THINKING:-false}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
-OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(38|37|36|35|34)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(33|32|31|30|29|28|27|26|25|24)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
+OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(38|37|36|35|34)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(33|31|30|29|28|27|26|25|24|23)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
 
 # Pick model: env var wins, otherwise prompt from the available .gguf files.
 if [[ -z "${MODEL_FILE:-}" ]]; then
@@ -46,26 +47,16 @@ if [[ ! -f "models/${MODEL_FILE}" ]]; then
     exit 1
 fi
 
-# Optional vision projector: explicit MMPROJ_FILE wins; otherwise auto-detect
-# any *mmproj*.gguf in models/ that shares a prefix with the chosen MODEL_FILE.
+# Optional vision projector: off by default. Set MMPROJ_FILE=<name> to enable.
 mmproj_args=()
-if [[ -z "${MMPROJ_FILE:-}" && -z "${NO_MMPROJ:-}" ]]; then
-    model_lc="${MODEL_FILE,,}"
-    for cand in models/*mmproj*.gguf; do
-        [[ -f "$cand" ]] || continue
-        cand_base="$(basename "$cand")"
-        cand_lc="${cand_base,,}"
-        cand_prefix="${cand_lc%%mmproj*}"
-        cand_prefix="${cand_prefix%-}"
-        if [[ -n "$cand_prefix" && "$model_lc" == "${cand_prefix}"* ]]; then
-            MMPROJ_FILE="$cand_base"
-            break
-        fi
-    done
-fi
 override_tensor_args=()
 if [[ -n "${OVERRIDE_TENSOR}" ]]; then
     override_tensor_args=(--override-tensor "${OVERRIDE_TENSOR}")
+fi
+
+thinking_args=()
+if [[ "${THINKING}" == "false" ]]; then
+    thinking_args=(--jinja --chat-template-kwargs '{"enable_thinking": false}')
 fi
 
 if [[ -n "${MMPROJ_FILE:-}" ]]; then
@@ -105,10 +96,12 @@ docker create \
     "${mmproj_args[@]}" \
     --host 0.0.0.0 \
     --port 8080 \
+    --metrics \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
     --tensor-split 1,0 \
     "${override_tensor_args[@]}" \
+    "${thinking_args[@]}" \
     -fit off \
     --n-cpu-moe "${N_CPU_MOE}" \
     --no-mmap \

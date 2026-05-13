@@ -1,0 +1,14 @@
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: openai/qwen-local
+      api_base: http://172.18.0.10:8080/v1
+      api_key: dummy
+      use_chat_completions_api: true
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+general_settings:
+  master_key: sk-litellm-local
