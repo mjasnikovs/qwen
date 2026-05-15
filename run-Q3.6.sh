@@ -56,6 +56,7 @@ docker create \
     -ctk turbo4 \
     -ctv turbo4 \
     --cache-ram 2048 \
+    --cache-reuse 256 \
     --no-kv-unified \
     -c 128000 \
     -n -1 \
