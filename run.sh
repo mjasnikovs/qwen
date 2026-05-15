@@ -5,10 +5,12 @@ cd "$(dirname "$0")"
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-N_CPU_MOE="${N_CPU_MOE:-36}"
 CTX_SIZE="${CTX_SIZE:-128000}" #200000
 CACHE_TYPE_K="${CACHE_TYPE_K:-turbo4}"
-CACHE_TYPE_V="${CACHE_TYPE_V:-turbo3}"
+CACHE_TYPE_V="${CACHE_TYPE_V:-turbo4}"
+CACHE_REUSE="${CACHE_REUSE:-256}"
+CACHE_RAM="${CACHE_RAM:-2048}"
+KV_UNIFIED="${KV_UNIFIED:-off}"
 THINKING="${THINKING:-false}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
@@ -59,6 +61,13 @@ if [[ "${THINKING}" == "false" ]]; then
     thinking_args=(--jinja --chat-template-kwargs '{"enable_thinking": false}')
 fi
 
+kv_unified_args=()
+if [[ "${KV_UNIFIED}" == "on" ]]; then
+    kv_unified_args=(--kv-unified)
+elif [[ "${KV_UNIFIED}" == "off" ]]; then
+    kv_unified_args=(--no-kv-unified)
+fi
+
 if [[ -n "${MMPROJ_FILE:-}" ]]; then
     if [[ ! -f "models/${MMPROJ_FILE}" ]]; then
         echo "Vision projector not found: models/${MMPROJ_FILE}" >&2
@@ -103,13 +112,14 @@ docker create \
     "${override_tensor_args[@]}" \
     "${thinking_args[@]}" \
     -fit off \
-    --n-cpu-moe "${N_CPU_MOE}" \
     --no-mmap \
     --mlock \
     -fa on \
     --cache-type-k "${CACHE_TYPE_K}" \
     --cache-type-v "${CACHE_TYPE_V}" \
-    --cache-ram 2048 \
+    --cache-ram "${CACHE_RAM}" \
+    --cache-reuse "${CACHE_REUSE}" \
+    "${kv_unified_args[@]}" \
     -c "${CTX_SIZE}" \
     --parallel 1 \
     -b 1536 \

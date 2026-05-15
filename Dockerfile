@@ -11,9 +11,12 @@ ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_V
 # Pin to the turboquant branch tip; override at build time if needed.
 ARG TURBOQUANT_REF=69d8e4be47243e83b3d0d71e932bc7aa61c644dc
 
+# llama.cpp PR #22673 — MTP (Multi-Token Prediction) speculative decoding support
+ARG MTP_PR=22673
+
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
-ARG CUDA_DOCKER_ARCH=default
+ARG CUDA_DOCKER_ARCH=86-real;61-real
 
 # Parallel compile jobs. nvcc uses 2-4 GB RAM each, so on a desktop you'll
 # want to cap this — building with -j$(nproc) on CUDA easily OOMs the host.
@@ -25,6 +28,7 @@ ARG BUILD_JOBS=4
 FROM ${BASE_CUDA_DEV_CONTAINER} AS build
 ARG TURBOQUANT_REF
 ARG CUDA_DOCKER_ARCH
+ARG MTP_PR
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
@@ -34,8 +38,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 
 WORKDIR /src
+RUN git config --global user.email "build@local" && git config --global user.name "Docker Build"
 RUN git clone --filter=blob:none https://github.com/TheTom/llama-cpp-turboquant.git . \
-    && git checkout ${TURBOQUANT_REF}
+    && git checkout ${TURBOQUANT_REF} \
+    && git remote add upstream https://github.com/ggml-org/llama.cpp.git \
+    && git fetch upstream pull/${MTP_PR}/head:pr-mtp \
+    && git merge --no-ff -X ours pr-mtp -m "Merge llama.cpp PR #${MTP_PR}: MTP speculative decoding support" \
+    && git checkout pr-mtp -- common/ \
+    && sed -i 's/GGML_TYPE_Q5_1,/GGML_TYPE_Q5_1,\n        GGML_TYPE_TURBO2_0,\n        GGML_TYPE_TURBO3_0,\n        GGML_TYPE_TURBO4_0,/' common/arg.cpp
 
 RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \

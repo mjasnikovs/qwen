@@ -8,6 +8,7 @@ NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.11}"
 NAME="${NAME:-llama-litellm}"
 CONFIG_FILE="${CONFIG_FILE:-litellm/config.yaml}"
+LITELLM_LOG="${LITELLM_LOG:-INFO}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
     echo "LiteLLM config not found: ${CONFIG_FILE}" >&2
@@ -28,6 +29,7 @@ docker create \
     -p "${HOST_PORT}:4000" \
     --network "${NETWORK}" \
     --ip "${STATIC_IP}" \
+    -e "LITELLM_LOG=${LITELLM_LOG}" \
     -v "$(pwd)/${CONFIG_FILE}:/app/config.yaml:ro" \
     "${IMAGE}" \
     --config /app/config.yaml \
