@@ -2,17 +2,21 @@
 
 # Builds llama-server (CUDA) from TheTom/llama-cpp-turboquant
 # which adds turbo3/turbo4 KV cache quant types on top of upstream llama.cpp.
+#
+# Uses the fork's sync/upstream-b9190-mtp branch: turboquant features
+# already rebased onto upstream master @ b9190, which contains the merged
+# MTP speculative decoding support (llama.cpp PR #22673, merged 2026-05-16).
+# No manual PR merge or arg.cpp patching needed.
 
 ARG UBUNTU_VERSION=24.04
 ARG CUDA_VERSION=12.8.1
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
-# Pin to the turboquant branch tip; override at build time if needed.
-ARG TURBOQUANT_REF=69d8e4be47243e83b3d0d71e932bc7aa61c644dc
-
-# llama.cpp PR #22673 — MTP (Multi-Token Prediction) speculative decoding support
-ARG MTP_PR=22673
+# Pin to the sync/upstream-b9190-mtp tip; override at build time if needed.
+ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
+ARG TURBOQUANT_BRANCH=sync/upstream-b9190-mtp
+ARG TURBOQUANT_REF=c654c4c2629c6c1ae1fd1fff9295284bb3a13c20
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
@@ -26,9 +30,10 @@ ARG BUILD_JOBS=4
 # Build stage
 ############################
 FROM ${BASE_CUDA_DEV_CONTAINER} AS build
+ARG TURBOQUANT_REPO
+ARG TURBOQUANT_BRANCH
 ARG TURBOQUANT_REF
 ARG CUDA_DOCKER_ARCH
-ARG MTP_PR
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
@@ -38,14 +43,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 
 WORKDIR /src
-RUN git config --global user.email "build@local" && git config --global user.name "Docker Build"
-RUN git clone --filter=blob:none https://github.com/TheTom/llama-cpp-turboquant.git . \
-    && git checkout ${TURBOQUANT_REF} \
-    && git remote add upstream https://github.com/ggml-org/llama.cpp.git \
-    && git fetch upstream pull/${MTP_PR}/head:pr-mtp \
-    && git merge --no-ff -X ours pr-mtp -m "Merge llama.cpp PR #${MTP_PR}: MTP speculative decoding support" \
-    && git checkout pr-mtp -- common/ \
-    && sed -i 's/GGML_TYPE_Q5_1,/GGML_TYPE_Q5_1,\n        GGML_TYPE_TURBO2_0,\n        GGML_TYPE_TURBO3_0,\n        GGML_TYPE_TURBO4_0,/' common/arg.cpp
+RUN git clone --filter=blob:none --branch "${TURBOQUANT_BRANCH}" "${TURBOQUANT_REPO}" . \
+    && git checkout "${TURBOQUANT_REF}" \
+    && git log -1 --format='build commit: %H %s'
 
 RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \

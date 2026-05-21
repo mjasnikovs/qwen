@@ -183,6 +183,8 @@ def main() -> int:
                    help="per-request timeout in seconds (default: 600)")
     p.add_argument("--warmup", action="store_true",
                    help="run one throwaway request first to load the model")
+    p.add_argument("--loop", action="store_true",
+                   help="repeat the full benchmark in a loop until Ctrl+C")
     args = p.parse_args()
 
     print(f"Target: {args.host}   model={args.model}   runs={args.runs}")
@@ -199,41 +201,62 @@ def main() -> int:
 
     overall_prompt_tps = []
     overall_gen_tps = []
+    iteration = 0
 
-    for spec in PROMPTS:
-        print(spec["name"])
-        runs = []
-        for i in range(args.runs):
-            try:
-                r = stream_chat(
-                    args.host, args.model,
-                    spec["system"], spec["user"],
-                    max_tokens=spec["max_tokens"],
-                    timeout=args.timeout,
-                )
-            except Exception as e:
-                print(f"  run {i+1}: ERROR {e}", file=sys.stderr)
-                continue
-            r.name = spec["name"]
-            runs.append(r)
-            print(f"  run {i+1}:" + fmt_row(r))
+    try:
+        while True:
+            iteration += 1
+            if args.loop:
+                print(f"=== Iteration {iteration} ===")
 
-        if not runs:
-            continue
-        if args.runs > 1:
-            avg_prompt = sum(r.prompt_tps for r in runs) / len(runs)
-            avg_gen = sum(r.gen_tps for r in runs) / len(runs)
-            print(f"  avg:   prompt {avg_prompt:7.1f} t/s   gen {avg_gen:6.1f} t/s")
-        overall_prompt_tps.extend(r.prompt_tps for r in runs if r.prompt_tps)
-        overall_gen_tps.extend(r.gen_tps for r in runs if r.gen_tps)
-        print()
+            for spec in PROMPTS:
+                print(spec["name"])
+                runs = []
+                for i in range(args.runs):
+                    try:
+                        r = stream_chat(
+                            args.host, args.model,
+                            spec["system"], spec["user"],
+                            max_tokens=spec["max_tokens"],
+                            timeout=args.timeout,
+                        )
+                    except Exception as e:
+                        print(f"  run {i+1}: ERROR {e}", file=sys.stderr)
+                        continue
+                    r.name = spec["name"]
+                    runs.append(r)
+                    print(f"  run {i+1}:" + fmt_row(r))
 
-    if overall_prompt_tps and overall_gen_tps:
-        print("Summary (across all runs):")
-        print(f"  prompt processing: {max(overall_prompt_tps):7.1f} t/s peak, "
-              f"{sum(overall_prompt_tps)/len(overall_prompt_tps):7.1f} t/s mean")
-        print(f"  token generation:  {max(overall_gen_tps):7.1f} t/s peak, "
-              f"{sum(overall_gen_tps)/len(overall_gen_tps):7.1f} t/s mean")
+                if not runs:
+                    continue
+                if args.runs > 1:
+                    avg_prompt = sum(r.prompt_tps for r in runs) / len(runs)
+                    avg_gen = sum(r.gen_tps for r in runs) / len(runs)
+                    print(f"  avg:   prompt {avg_prompt:7.1f} t/s   gen {avg_gen:6.1f} t/s")
+                overall_prompt_tps.extend(r.prompt_tps for r in runs if r.prompt_tps)
+                overall_gen_tps.extend(r.gen_tps for r in runs if r.gen_tps)
+                print()
+
+            if overall_prompt_tps and overall_gen_tps:
+                print("Summary (across all runs):")
+                print(f"  prompt processing: {max(overall_prompt_tps):7.1f} t/s peak, "
+                      f"{sum(overall_prompt_tps)/len(overall_prompt_tps):7.1f} t/s mean")
+                print(f"  token generation:  {max(overall_gen_tps):7.1f} t/s peak, "
+                      f"{sum(overall_gen_tps)/len(overall_gen_tps):7.1f} t/s mean")
+
+            if not args.loop:
+                break
+            print()
+
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        if overall_prompt_tps and overall_gen_tps:
+            print("\nFinal summary (across all iterations):")
+            print(f"  prompt processing: {max(overall_prompt_tps):7.1f} t/s peak, "
+                  f"{sum(overall_prompt_tps)/len(overall_prompt_tps):7.1f} t/s mean")
+            print(f"  token generation:  {max(overall_gen_tps):7.1f} t/s peak, "
+                  f"{sum(overall_gen_tps)/len(overall_gen_tps):7.1f} t/s mean")
+
     return 0
 
 

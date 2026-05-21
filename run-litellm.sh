@@ -3,12 +3,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-ghcr.io/berriai/litellm:main-stable}"
-HOST_PORT="${HOST_PORT:-4000}"
+HOST_PORT="${HOST_PORT:-8081}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.11}"
 NAME="${NAME:-llama-litellm}"
 CONFIG_FILE="${CONFIG_FILE:-litellm/config.yaml}"
 LITELLM_LOG="${LITELLM_LOG:-INFO}"
+MEMORY_LIMIT="${MEMORY_LIMIT:-2g}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
     echo "LiteLLM config not found: ${CONFIG_FILE}" >&2
@@ -24,8 +25,8 @@ fi
 docker create \
     --name "${NAME}" \
     --restart=no \
-    --memory=1g \
-    --memory-swap=1g \
+    --memory="${MEMORY_LIMIT}" \
+    --memory-swap="${MEMORY_LIMIT}" \
     -p "${HOST_PORT}:4000" \
     --network "${NETWORK}" \
     --ip "${STATIC_IP}" \

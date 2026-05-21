@@ -6,9 +6,11 @@ IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
-MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL.gguf}"
+MODEL_FILE="${MODEL_FILE:-Qwen3-Coder-Next-Q3_K_S.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(38|37|36|35)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(34|33|31|30|29|28|27|26|25|24)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
+# qwen3next: 48 blocks (blk.0–blk.47), 512 experts/10 active, ~768MB expert weights/block
+# CUDA0 (7322 MiB free): blocks 47–40 (8 blocks ~6.1GB); CUDA1 (4986 MiB free): blocks 39–35 (5 blocks ~3.8GB)
+OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(47|46|45|44|43|42)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(41|40|39|38|37|36|35)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
 
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
@@ -17,8 +19,6 @@ fi
 
 NAME="${NAME:-llama-turboquant}"
 
-# Remove any prior container with the same name so re-running this script
-# always produces a fresh, unstarted container.
 if docker inspect "${NAME}" >/dev/null 2>&1; then
     docker rm -f "${NAME}" >/dev/null
 fi
@@ -27,8 +27,8 @@ docker create \
     --name "${NAME}" \
     --restart=no \
     --gpus all \
-    --memory=30g \
-    --memory-swap=46g \
+    --memory=28g \
+    --memory-swap=28g \
     --cap-add=IPC_LOCK \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
@@ -48,33 +48,29 @@ docker create \
     --main-gpu 0 \
     --tensor-split 1,0 \
     --override-tensor "${OVERRIDE_TENSOR}" \
+    --jinja \
+    --chat-template-kwargs '{"enable_thinking": false}' \
+    --reasoning off \
     -fit off \
-    --flash-attn on \
-    -c 128000 \
-    -n -1 \
-    --parallel 2 \
-    -ctk turbo4 \
-    -ctv turbo4 \
-    -ctkd turbo3 \
-    -ctvd turbo3 \
-    --kv-unified \
     --no-mmap \
     --mlock \
-    --jinja \
-    --chat-template-kwargs '{"enable_thinking": true, "preserve_thinking": true}' \
-    --reasoning on \
-    --spec-type draft-mtp \
-    --spec-draft-n-max 3 \
-    --temp 1.0 \
-    --top-p 0.95 \
-    --top-k 20 \
-    --min-p 0.0 \
-    --presence-penalty 0.0 \
+    --flash-attn on \
+    -ctk turbo4 \
+    -ctv turbo4 \
+    --cache-ram 4096 \
+    --cache-reuse 256 \
+    --no-kv-unified \
+    -c 128000 \
+    -n -1 \
+    -np 1 \
+    -b 1028 \
+    -ub 1028 \
+    --temperature 1.0 \
+    --top_p 0.95 \
+    --top_k 40 \
+    --min_p 0.1 \
+    --presence_penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 4096 \
-    -ub 696 \
-    --cache-idle-slots \
-    --cache-ram 2048 \
     --threads 8 \
     --cpu-range 0-7 \
     "$@" >/dev/null

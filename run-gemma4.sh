@@ -6,9 +6,10 @@ IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
-MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL.gguf}"
+MODEL_FILE="${MODEL_FILE:-gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(38|37|36|35)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(34|33|31|30|29|28|27|26|25|24)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
+# Gemma 4 26B-A4B has 30 blocks (blk.0–blk.29); MoE tensors are ffn_gate_up_exps + ffn_down_exps
+OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(29|28|27|26)\.ffn_(gate_up|down)_exps\.=CUDA0,blk\.(25|24|23|22|21|20|19|18|17|16)\.ffn_(gate_up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate_up|down)_exps\.=CPU}"
 
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
@@ -17,8 +18,6 @@ fi
 
 NAME="${NAME:-llama-turboquant}"
 
-# Remove any prior container with the same name so re-running this script
-# always produces a fresh, unstarted container.
 if docker inspect "${NAME}" >/dev/null 2>&1; then
     docker rm -f "${NAME}" >/dev/null
 fi
@@ -27,8 +26,8 @@ docker create \
     --name "${NAME}" \
     --restart=no \
     --gpus all \
-    --memory=30g \
-    --memory-swap=46g \
+    --memory=28g \
+    --memory-swap=28g \
     --cap-add=IPC_LOCK \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
@@ -48,33 +47,29 @@ docker create \
     --main-gpu 0 \
     --tensor-split 1,0 \
     --override-tensor "${OVERRIDE_TENSOR}" \
+    --jinja \
+    --chat-template-kwargs '{"enable_thinking": true}' \
+    --reasoning on \
     -fit off \
-    --flash-attn on \
-    -c 128000 \
-    -n -1 \
-    --parallel 2 \
-    -ctk turbo4 \
-    -ctv turbo4 \
-    -ctkd turbo3 \
-    -ctvd turbo3 \
-    --kv-unified \
     --no-mmap \
     --mlock \
-    --jinja \
-    --chat-template-kwargs '{"enable_thinking": true, "preserve_thinking": true}' \
-    --reasoning on \
-    --spec-type draft-mtp \
-    --spec-draft-n-max 3 \
-    --temp 1.0 \
-    --top-p 0.95 \
-    --top-k 20 \
-    --min-p 0.0 \
-    --presence-penalty 0.0 \
+    --flash-attn on \
+    -ctk turbo4 \
+    -ctv turbo4 \
+    --cache-ram 4096 \
+    --cache-reuse 256 \
+    --no-kv-unified \
+    -c 128000 \
+    -n -1 \
+    -np 1 \
+    -b 1536 \
+    -ub 1536 \
+    --temperature 1.0 \
+    --top_p 0.95 \
+    --top_k 64 \
+    --min_p 0.0 \
+    --presence_penalty 0.0 \
     --repeat-penalty 1.0 \
-    -b 4096 \
-    -ub 696 \
-    --cache-idle-slots \
-    --cache-ram 2048 \
     --threads 8 \
     --cpu-range 0-7 \
     "$@" >/dev/null
