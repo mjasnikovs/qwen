@@ -77,6 +77,7 @@ docker create \
     --cache-ram 2048 \
     --threads 8 \
     --cpu-range 0-7 \
+    --timeout 360 \
     "$@" >/dev/null
 
 docker start -a "${NAME}"
