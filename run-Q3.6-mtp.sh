@@ -2,13 +2,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+export CUDA_MALLOC_ASYNC_SUPPORTED=1
+export GGML_CUDA_FORCE_MMQ=1
+
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 NETWORK="${NETWORK:-aiz-docker_aiz-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(38|37|36|35)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(34|33|31|30|29|28|27|26|25|24)\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
+OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(3[0-9]|2[0-9]|19|18|17|16)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(1[0-9]|[0-9])\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
 
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
@@ -50,9 +53,9 @@ docker create \
     --override-tensor "${OVERRIDE_TENSOR}" \
     -fit off \
     --flash-attn on \
-    -c 128000 \
+    -c 120000 \
     -n -1 \
-    --parallel 2 \
+    --parallel 1 \
     -ctk turbo4 \
     -ctv turbo4 \
     -ctkd turbo3 \
@@ -72,7 +75,7 @@ docker create \
     --presence-penalty 0.0 \
     --repeat-penalty 1.0 \
     -b 4096 \
-    -ub 696 \
+    -ub 256 \
     --cache-idle-slots \
     --cache-ram 2048 \
     --threads 8 \

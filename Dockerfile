@@ -4,8 +4,7 @@
 # which adds turbo3/turbo4 KV cache quant types on top of upstream llama.cpp.
 #
 # Uses the fork's sync/upstream-b9190-mtp branch: turboquant features
-# already rebased onto upstream master @ b9190, which contains the merged
-# MTP speculative decoding support (llama.cpp PR #22673, merged 2026-05-16).
+# rebased onto upstream master with MTP speculative decoding support.
 # No manual PR merge or arg.cpp patching needed.
 
 ARG UBUNTU_VERSION=24.04
@@ -16,11 +15,11 @@ ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_V
 # Pin to the sync/upstream-b9190-mtp tip; override at build time if needed.
 ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
 ARG TURBOQUANT_BRANCH=sync/upstream-b9190-mtp
-ARG TURBOQUANT_REF=c654c4c2629c6c1ae1fd1fff9295284bb3a13c20
+ARG TURBOQUANT_REF=eef2db43922369c7f61803002d5547a30d0481fc
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
-ARG CUDA_DOCKER_ARCH=86-real;61-real
+ARG CUDA_DOCKER_ARCH=120-real;86-real
 
 # Parallel compile jobs. nvcc uses 2-4 GB RAM each, so on a desktop you'll
 # want to cap this — building with -j$(nproc) on CUDA easily OOMs the host.
