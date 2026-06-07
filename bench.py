@@ -50,6 +50,17 @@ PROMPTS = [
         "max_tokens": 32,
     },
     {
+        "name": "pp_xl     (10k+ token prompt -> short output)",
+        "system": "You summarize text in one short sentence.",
+        # ~12k tokens of filler so a very deep prefill dominates. The phrase
+        # is ~10 tokens, so 1200 repeats comfortably clears the 10k mark.
+        "user": (
+            "Summarize the following text in ONE sentence:\n\n"
+            + ("The quick brown fox jumps over the lazy dog. " * 1200)
+        ),
+        "max_tokens": 32,
+    },
+    {
         "name": "realistic (coding question)",
         "system": "You are a senior software engineer.",
         "user": (
@@ -59,7 +70,7 @@ PROMPTS = [
             "calls with expected output."
         ),
         "max_tokens": 384,
-    },
+    }
 ]
 
 
@@ -73,6 +84,8 @@ class Result:
     prompt_tps: float        # server-reported prompt processing tok/s
     gen_tps: float           # server-reported generation tok/s
     wall_gen_tps: float      # generation tok/s computed from wall clock
+    draft_n: int = 0         # MTP/speculative draft tokens generated
+    draft_accepted: int = 0  # MTP/speculative draft tokens accepted
 
 
 def stream_chat(host: str, model: str, system: str, user: str,
@@ -93,6 +106,9 @@ def stream_chat(host: str, model: str, system: str, user: str,
         "temperature": 0.0,
         "stream": True,
         "stream_options": {"include_usage": True},
+        # Required for llama-server to attach speculative/MTP draft stats
+        # (draft_n, draft_n_accepted) to the final chunk's timings object.
+        "timings_per_token": True,
     }
     req = urllib.request.Request(
         f"{host.rstrip('/')}/v1/chat/completions",
@@ -143,6 +159,8 @@ def stream_chat(host: str, model: str, system: str, user: str,
     )
     prompt_tps = float(timings.get("prompt_per_second") or 0.0)
     gen_tps = float(timings.get("predicted_per_second") or 0.0)
+    draft_n = int(timings.get("draft_n") or 0)
+    draft_accepted = int(timings.get("draft_n_accepted") or 0)
 
     # Wall-clock generation rate: tokens emitted / time after first token.
     decode_wall = max(wall_total - ttft, 1e-9)
@@ -157,16 +175,25 @@ def stream_chat(host: str, model: str, system: str, user: str,
         prompt_tps=prompt_tps,
         gen_tps=gen_tps,
         wall_gen_tps=wall_gen_tps,
+        draft_n=draft_n,
+        draft_accepted=draft_accepted,
     )
 
 
 def fmt_row(r: Result) -> str:
+    mtp = ""
+    if r.draft_n:
+        mtp = (
+            f"  mtp={r.draft_accepted:>4}/{r.draft_n:<4} "
+            f"({r.draft_accepted / r.draft_n:.3f})"
+        )
     return (
         f"  ttft={r.ttft_s*1000:7.1f} ms  "
         f"prompt={r.prompt_n:>5}t @ {r.prompt_tps:7.1f} t/s  "
         f"gen={r.predicted_n:>4}t @ {r.gen_tps:6.1f} t/s "
         f"(wall {r.wall_gen_tps:6.1f} t/s)  "
         f"total={r.wall_total_s:6.2f}s"
+        f"{mtp}"
     )
 
 
@@ -201,6 +228,8 @@ def main() -> int:
 
     overall_prompt_tps = []
     overall_gen_tps = []
+    overall_draft_n = 0
+    overall_draft_accepted = 0
     iteration = 0
 
     try:
@@ -235,6 +264,8 @@ def main() -> int:
                     print(f"  avg:   prompt {avg_prompt:7.1f} t/s   gen {avg_gen:6.1f} t/s")
                 overall_prompt_tps.extend(r.prompt_tps for r in runs if r.prompt_tps)
                 overall_gen_tps.extend(r.gen_tps for r in runs if r.gen_tps)
+                overall_draft_n += sum(r.draft_n for r in runs)
+                overall_draft_accepted += sum(r.draft_accepted for r in runs)
                 print()
 
             if overall_prompt_tps and overall_gen_tps:
@@ -243,6 +274,9 @@ def main() -> int:
                       f"{sum(overall_prompt_tps)/len(overall_prompt_tps):7.1f} t/s mean")
                 print(f"  token generation:  {max(overall_gen_tps):7.1f} t/s peak, "
                       f"{sum(overall_gen_tps)/len(overall_gen_tps):7.1f} t/s mean")
+                if overall_draft_n:
+                    print(f"  mtp acceptance:    {overall_draft_accepted/overall_draft_n:.5f} "
+                          f"({overall_draft_accepted} accepted / {overall_draft_n} generated)")
 
             if not args.loop:
                 break
@@ -256,6 +290,9 @@ def main() -> int:
                   f"{sum(overall_prompt_tps)/len(overall_prompt_tps):7.1f} t/s mean")
             print(f"  token generation:  {max(overall_gen_tps):7.1f} t/s peak, "
                   f"{sum(overall_gen_tps)/len(overall_gen_tps):7.1f} t/s mean")
+            if overall_draft_n:
+                print(f"  mtp acceptance:    {overall_draft_accepted/overall_draft_n:.5f} "
+                      f"({overall_draft_accepted} accepted / {overall_draft_n} generated)")
 
     return 0
 

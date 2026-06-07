@@ -71,13 +71,13 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 0.0 \
     --repeat-penalty 1.0 \
-    -b 512 \
-    -ub 256 \
+    -b 256 \
+    -ub 128 \
     --cache-idle-slots \
     --cache-ram 8192 \
     --cache-reuse 256 \
-    --threads 16 \
-    --cpu-range 0-15 \
+    --threads 8 \
+    --cpu-range 0-7 \
     --timeout 360 \
     "$@" >/dev/null
 
