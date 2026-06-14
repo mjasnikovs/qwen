@@ -7,7 +7,7 @@ export GGML_CUDA_FORCE_MMQ=1
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
-NETWORK="${NETWORK:-aiz-docker_aiz-network}"
+NETWORK="${NETWORK:-runner-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-27B-UD-Q4_K_XL.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
@@ -61,12 +61,11 @@ docker create \
     --no-mmap \
     --mlock \
     --jinja \
-    --chat-template-kwargs '{"enable_thinking": true, "preserve_thinking": true}' \
-    --reasoning on \
+    --reasoning off \
     --spec-type draft-mtp \
     --spec-draft-n-max 2 \
-    --temp 0.6 \
-    --top-p 0.95 \
+    --temp 0.5 \
+    --top-p 0.8 \
     --top-k 20 \
     --min-p 0.0 \
     --presence-penalty 0.0 \

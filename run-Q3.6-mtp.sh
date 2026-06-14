@@ -7,11 +7,14 @@ export GGML_CUDA_FORCE_MMQ=1
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
-NETWORK="${NETWORK:-aiz-docker_aiz-network}"
+NETWORK="${NETWORK:-runner-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
-MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL.gguf}"
+MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-blk\.(4[0-9]|3[0-9]|2[0-9]|19)\.ffn_(gate|up|down)_exps\.=CUDA0,blk\.(1[0-9]|[3-9])\.ffn_(gate|up|down)_exps\.=CUDA1,blk\..*\.ffn_(gate|up|down)_exps\.=CPU}"
+OT_CUDA0='blk\.(4[0-9]|3[0-9]|2[0-9]|19)\.ffn_(gate|up|down)_exps\.=CUDA0'   # blk 0-20  -> 16 GB GPU
+OT_CUDA1='blk\.(1[0-9]|[3-9])\.ffn_(gate|up|down)_exps\.=CUDA1'    # blk 21-33 -> 8 GB GPU
+OT_CPU='blk\..*\.ffn_(gate|up|down)_exps\.=CPU'                     # the rest  -> RAM (catch-all, keep last)
+OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-${OT_CUDA0},${OT_CUDA1},${OT_CPU}}"
 
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
@@ -55,7 +58,7 @@ docker create \
     --flash-attn on \
     -c 120000 \
     -n -1 \
-    --parallel 3 \
+    --parallel 1 \
     -ctk turbo4 \
     -ctv turbo4 \
     -ctkd turbo3 \
@@ -64,20 +67,19 @@ docker create \
     --no-mmap \
     --mlock \
     --jinja \
-    --chat-template-kwargs '{"enable_thinking": true, "preserve_thinking": true}' \
-    --reasoning on \
+    --reasoning off \
     --spec-type draft-mtp \
-    --spec-draft-n-max 3 \
+    --spec-draft-n-max 2 \
     --temp 1.0 \
     --top-p 0.95 \
     --top-k 20 \
     --min-p 0.0 \
-    --presence-penalty 0.0 \
+    --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 2048 \
+    -b 1024 \
     -ub 256 \
     --cache-idle-slots \
-    --cache-ram 2048 \
+    --cache-ram 16384 \
     --cache-reuse 256 \
     --threads 8 \
     --cpu-range 0-7 \

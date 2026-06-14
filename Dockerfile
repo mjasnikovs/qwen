@@ -3,8 +3,8 @@
 # Builds llama-server (CUDA) from TheTom/llama-cpp-turboquant
 # which adds turbo3/turbo4 KV cache quant types on top of upstream llama.cpp.
 #
-# Uses the fork's sync/upstream-b9190-mtp branch: turboquant features
-# rebased onto upstream master with MTP speculative decoding support.
+# Uses the fork's sync/upstream-b9190-mtp branch: turboquant (turbo2/3/4) KV cache
+# types rebased onto upstream b9190 with Qwen3 MTP speculative decoding support.
 # No manual PR merge or arg.cpp patching needed.
 
 ARG UBUNTU_VERSION=24.04
