@@ -16,8 +16,8 @@ N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
 # CUDA0 RTX 5070 Ti (16GB): ~3GB attn + 23 expert blocks (~12GB) ≈ 14GB used
 # CUDA1 RTX 3070 Ti  ( 8GB): 9 expert blocks (~6.5GB) + compute buffers ≈ 7.5GB used
 # CPU: blk 0-14 + 50+ -> RAM
-OT_CUDA0='blk\.(4[0-9]|3[0-9]|1[8-9]|20)\.ffn_(gate|up|down)_exps\.=CUDA0'  # blk 18-20,30-49 -> RTX 5070 Ti
-OT_CUDA1='blk\.(2[1-9])\.ffn_(gate|up|down)_exps\.=CUDA1'                     # blk 21-29 -> RTX 3070 Ti
+OT_CUDA0='blk\.(4[0-9]|3[0-9]|20|19|18)\.ffn_(gate|up|down)_exps\.=CUDA0'  # blk 18-20,30-49 -> RTX 5070 Ti
+OT_CUDA1='blk\.(2[0-9]|10)\.ffn_(gate|up|down)_exps\.=CUDA1'                     # blk 21-29 -> RTX 3070 Ti
 OT_CPU='blk\..*\.ffn_(gate|up|down)_exps\.=CPU'                               # blk 0-12 + 50+ -> RAM
 OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-${OT_CUDA0},${OT_CUDA1},${OT_CPU}}"
 
@@ -36,8 +36,8 @@ docker create \
     --name "${NAME}" \
     --restart=no \
     --gpus all \
-    --memory=24g \
-    --memory-swap=28g \
+    --memory=28g \
+    --memory-swap=32g \
     --cap-add=IPC_LOCK \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
@@ -79,8 +79,8 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 1024 \
-    -ub 256 \
+    -b 1536 \
+    -ub 768 \
     --cache-idle-slots \
     --cache-ram 6144 \
     --cache-reuse 256 \

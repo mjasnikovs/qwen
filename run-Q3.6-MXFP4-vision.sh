@@ -11,6 +11,14 @@ NETWORK="${NETWORK:-runner-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MXFP4_MOE.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
+
+# --- Vision (multimodal) projector ---------------------------------------
+# Qwen3.6-VL needs an mmproj (CLIP/vision projector) GGUF alongside the LLM.
+# Set MMPROJ_URL to the projector for this model build, then it is fetched
+# into models/ on first run. Override MMPROJ_FILE/MMPROJ_URL via env as needed.
+MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.6-35B-A3B-F16.gguf}"
+MMPROJ_URL="${MMPROJ_URL:-https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf}"
+
 # qwen35moe: 41 layers (blk 0-40), 256 experts / 8 used, head 16, kv 2, ctx 262144.
 # MXFP4 (~22.2GB): expert tensors are mxfp4 (144 B/256) -> identical per-block size
 # to Q4_K_XL: ~486.5 MB/block (blk 34,38 ~522, blk 39 ~589). Total experts ~20.1GB,
@@ -25,6 +33,18 @@ OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-${OT_CUDA0},${OT_CUDA1},${OT_CPU}}"
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
     exit 1
+fi
+
+# Download the vision projector if missing.
+if [[ ! -f "models/${MMPROJ_FILE}" ]]; then
+    if [[ -z "${MMPROJ_URL}" ]]; then
+        echo "mmproj not found: models/${MMPROJ_FILE}" >&2
+        echo "Set MMPROJ_URL to the projector GGUF download URL and re-run." >&2
+        exit 1
+    fi
+    echo "Downloading mmproj -> models/${MMPROJ_FILE}" >&2
+    curl -fL --retry 3 -C - -o "models/${MMPROJ_FILE}.part" "${MMPROJ_URL}"
+    mv "models/${MMPROJ_FILE}.part" "models/${MMPROJ_FILE}"
 fi
 
 NAME="${NAME:-llama-turboquant}"
@@ -53,6 +73,8 @@ docker create \
     --entrypoint /scripts/entrypoint.sh \
     "${IMAGE}" \
     --model "/models/${MODEL_FILE}" \
+    --mmproj "/models/${MMPROJ_FILE}" \
+    --mmproj-use-gpu \
     --host 0.0.0.0 \
     --port 8080 \
     --metrics \
@@ -74,8 +96,6 @@ docker create \
     --mlock \
     --jinja \
     --reasoning off \
-    --spec-type draft-mtp \
-    --spec-draft-n-max 2 \
     --temp 1.0 \
     --top-p 0.95 \
     --top-k 20 \
