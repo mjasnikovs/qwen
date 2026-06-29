@@ -25,8 +25,8 @@ MMPROJ_URL="${MMPROJ_URL:-https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/re
 # non-expert ~2GB (smaller than Q4_K_XL -> a touch more GPU0 headroom).
 # tensor-split 1,0 puts all attn/shared tensors on CUDA0 (RTX 5070 Ti, native FP4).
 # Placement matches the validated Q4_K_XL layout (identical block sizes):
-OT_CUDA0='blk\.(4[0-9]|3[0-9]|2[0-9]|19|18|17)\.ffn_(gate|up|down)_exps\.=CUDA0'   # blk 19-40 -> 16 GB GPU
-OT_CUDA1='blk\.(1[0-9]|[1-9])\.ffn_(gate|up|down)_exps\.=CUDA1'    # blk 3-18  -> 8 GB GPU
+OT_CUDA0='blk\.(4[0-9]|3[0-9]|2[0-9])\.ffn_(gate|up|down)_exps\.=CUDA0'   # blk 19-40 -> 16 GB GPU
+OT_CUDA1='blk\.(1[0-9]|[4-9])\.ffn_(gate|up|down)_exps\.=CUDA1'    # blk 3-18  -> 8 GB GPU
 OT_CPU='blk\..*\.ffn_(gate|up|down)_exps\.=CPU'                     # blk 0-2   -> RAM (catch-all, keep last)
 OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-${OT_CUDA0},${OT_CUDA1},${OT_CPU}}"
 
@@ -74,7 +74,7 @@ docker create \
     "${IMAGE}" \
     --model "/models/${MODEL_FILE}" \
     --mmproj "/models/${MMPROJ_FILE}" \
-    --mmproj-use-gpu \
+    --mmproj-offload \
     --host 0.0.0.0 \
     --port 8080 \
     --metrics \
