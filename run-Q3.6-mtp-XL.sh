@@ -34,7 +34,7 @@ fi
 
 docker create \
     --name "${NAME}" \
-    --restart=no \
+    --restart=unless-stopped \
     --gpus all \
     --memory=28g \
     --memory-swap=32g \
