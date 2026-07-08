@@ -3,19 +3,19 @@
 # Builds llama-server (CUDA) from TheTom/llama-cpp-turboquant
 # which adds turbo3/turbo4 KV cache quant types on top of upstream llama.cpp.
 #
-# Uses the fork's sync/upstream-b9190-mtp branch: turboquant (turbo2/3/4) KV cache
-# types rebased onto upstream b9190 with Qwen3 MTP speculative decoding support.
-# No manual PR merge or arg.cpp patching needed.
+# Uses the fork's default feature/turboquant-kv-cache branch: turboquant (turbo2/3/4)
+# KV cache types with Qwen3 MTP speculative decoding, continuously synced from
+# upstream llama.cpp master. No manual PR merge or arg.cpp patching needed.
 
 ARG UBUNTU_VERSION=24.04
 ARG CUDA_VERSION=12.8.1
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
-# Pin to the sync/upstream-b9190-mtp tip; override at build time if needed.
+# Pin to a feature/turboquant-kv-cache tip; override at build time if needed.
 ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
-ARG TURBOQUANT_BRANCH=sync/upstream-b9190-mtp
-ARG TURBOQUANT_REF=eef2db43922369c7f61803002d5547a30d0481fc
+ARG TURBOQUANT_BRANCH=feature/turboquant-kv-cache
+ARG TURBOQUANT_REF=558c6b78e4f8cf92ec19539ff89b6d13f4183feb
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
