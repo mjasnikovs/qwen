@@ -15,7 +15,7 @@ ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_V
 # Pin to a feature/turboquant-kv-cache tip; override at build time if needed.
 ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
 ARG TURBOQUANT_BRANCH=feature/turboquant-kv-cache
-ARG TURBOQUANT_REF=558c6b78e4f8cf92ec19539ff89b6d13f4183feb
+ARG TURBOQUANT_REF=30d6881eb97be0844b77ff7bc93175e15972d689
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
@@ -44,7 +44,12 @@ ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 WORKDIR /src
 RUN git clone --filter=blob:none --branch "${TURBOQUANT_BRANCH}" "${TURBOQUANT_REPO}" . \
     && git checkout "${TURBOQUANT_REF}" \
-    && git log -1 --format='build commit: %H %s'
+    && git log -1 --format='build commit: %H %s' \
+    # tqp-v0.3.0 embed.cpp still requires loading.html, but the current llama-ui
+    # bundle dropped it -> UI provisioning fails. Drop the stale required-check;
+    # all present assets (index.html, bundle, sw.js, ...) still embed normally.
+    && sed -i '/{ "loading.html",/d' tools/ui/embed.cpp \
+    && ! grep -q '"loading.html"' tools/ui/embed.cpp
 
 RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \

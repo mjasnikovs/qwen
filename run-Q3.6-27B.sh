@@ -11,12 +11,8 @@ NETWORK="${NETWORK:-runner-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 # 65 layers
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-27B-NVFP4-MTP.gguf}"
+MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.6-27B-F16.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-
-if [[ ! -f "models/${MODEL_FILE}" ]]; then
-    echo "Model not found: models/${MODEL_FILE}" >&2
-    exit 1
-fi
 
 NAME="${NAME:-llama-turboquant}"
 
@@ -42,6 +38,8 @@ docker create \
     --entrypoint /scripts/entrypoint.sh \
     "${IMAGE}" \
     --model "/models/${MODEL_FILE}" \
+    --mmproj "/models/${MMPROJ_FILE}" \
+    --mmproj-offload \
     --host 0.0.0.0 \
     --port 8080 \
     --metrics \
@@ -71,8 +69,8 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 256 \
-    -ub 128 \
+    -b 512 \
+    -ub 256 \
     --cache-idle-slots \
     --cache-ram 8192 \
     --cache-reuse 256 \
