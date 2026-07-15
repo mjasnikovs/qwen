@@ -59,6 +59,8 @@ docker create \
     --name "${NAME}" \
     --restart=unless-stopped \
     --gpus all \
+    -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    -e CUDA_VISIBLE_DEVICES=1,0 \
     --memory=30g \
     --memory-swap=46g \
     --cap-add=IPC_LOCK \

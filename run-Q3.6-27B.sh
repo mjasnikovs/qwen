@@ -24,6 +24,8 @@ docker create \
     --name "${NAME}" \
     --restart=unless-stopped \
     --gpus all \
+    -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    -e CUDA_VISIBLE_DEVICES=1,0 \
     --memory=30g \
     --memory-swap=46g \
     --cap-add=IPC_LOCK \
@@ -46,7 +48,7 @@ docker create \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
     --split-mode layer \
-    --tensor-split 49,16 \
+    --tensor-split 46,19 \
     -fit off \
     --flash-attn on \
     -c 120000 \
@@ -61,8 +63,11 @@ docker create \
     --mlock \
     --jinja \
     --reasoning off \
-    --spec-type draft-mtp \
+    --spec-type draft-mtp,ngram-mod \
     --spec-draft-n-max 3 \
+    --spec-ngram-mod-n-match 24 \
+    --spec-ngram-mod-n-min 4 \
+    --spec-ngram-mod-n-max 48 \
     --temp 0.7 \
     --top-p 0.8 \
     --top-k 20 \
