@@ -8,7 +8,10 @@
 # upstream llama.cpp master. No manual PR merge or arg.cpp patching needed.
 
 ARG UBUNTU_VERSION=24.04
-ARG CUDA_VERSION=12.8.1
+# CUDA 13.3 matches the host driver (610.x advertises CUDA 13.3) and has native
+# Blackwell (sm_120) support. Container carries the CUDA runtime only; the GPU
+# kernel driver comes from the host via the NVIDIA container runtime.
+ARG CUDA_VERSION=13.3.0
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
@@ -18,8 +21,9 @@ ARG TURBOQUANT_BRANCH=feature/turboquant-kv-cache
 ARG TURBOQUANT_REF=30d6881eb97be0844b77ff7bc93175e15972d689
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
-# (4090=89, 3090/A100=86/80, H100=90, RTX 50xx=120). Default builds all archs.
-ARG CUDA_DOCKER_ARCH=120-real;86-real
+# (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
+# Default targets this box: RTX 5070 Ti (120) + RTX 4070 SUPER (89).
+ARG CUDA_DOCKER_ARCH=120-real;89-real
 
 # Parallel compile jobs. nvcc uses 2-4 GB RAM each, so on a desktop you'll
 # want to cap this — building with -j$(nproc) on CUDA easily OOMs the host.
