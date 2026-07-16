@@ -9,15 +9,9 @@ IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
 NETWORK="${NETWORK:-runner-network}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
-MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-A3B-MXFP4_MOE.gguf}"
-N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
-
-# --- Vision (multimodal) projector ---------------------------------------
-# Qwen3.6-VL needs an mmproj (CLIP/vision projector) GGUF alongside the LLM.
-# Set MMPROJ_URL to the projector for this model build, then it is fetched
-# into models/ on first run. Override MMPROJ_FILE/MMPROJ_URL via env as needed.
+MODEL_FILE="${MODEL_FILE:-Qwen3.6-35B-Fast-NVFP4.gguf}"
 MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.6-35B-A3B-F16.gguf}"
-MMPROJ_URL="${MMPROJ_URL:-https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf}"
+N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
 
 # qwen35moe: 41 layers (blk 0-40), 256 experts / 8 used, head 16, kv 2, ctx 262144.
 # MXFP4 (~22.2GB): expert tensors are mxfp4 (144 B/256) -> identical per-block size
@@ -25,26 +19,14 @@ MMPROJ_URL="${MMPROJ_URL:-https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/re
 # non-expert ~2GB (smaller than Q4_K_XL -> a touch more GPU0 headroom).
 # tensor-split 1,0 puts all attn/shared tensors on CUDA0 (RTX 5070 Ti, native FP4).
 # Placement matches the validated Q4_K_XL layout (identical block sizes):
-OT_CUDA0='blk\.(4[0-9]|3[0-9]|2[0-9])\.ffn_(gate|up|down)_exps\.=CUDA0'   # blk 19-40 -> 16 GB GPU
-OT_CUDA1='blk\.(1[0-9]|[4-9])\.ffn_(gate|up|down)_exps\.=CUDA1'    # blk 3-18  -> 8 GB GPU
+OT_CUDA0='blk\.(4[0-9]|3[0-9]|2[0-3])\.ffn_(gate|up|down)_exps\.=CUDA0'   # blk 19-40 -> 16 GB GPU
+OT_CUDA1='blk\.(2[0-9]|1[0-9]|[0-9])\.ffn_(gate|up|down)_exps\.=CUDA1'    # blk 3-18  -> 8 GB GPU
 OT_CPU='blk\..*\.ffn_(gate|up|down)_exps\.=CPU'                     # blk 0-2   -> RAM (catch-all, keep last)
 OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-${OT_CUDA0},${OT_CUDA1},${OT_CPU}}"
 
 if [[ ! -f "models/${MODEL_FILE}" ]]; then
     echo "Model not found: models/${MODEL_FILE}" >&2
     exit 1
-fi
-
-# Download the vision projector if missing.
-if [[ ! -f "models/${MMPROJ_FILE}" ]]; then
-    if [[ -z "${MMPROJ_URL}" ]]; then
-        echo "mmproj not found: models/${MMPROJ_FILE}" >&2
-        echo "Set MMPROJ_URL to the projector GGUF download URL and re-run." >&2
-        exit 1
-    fi
-    echo "Downloading mmproj -> models/${MMPROJ_FILE}" >&2
-    curl -fL --retry 3 -C - -o "models/${MMPROJ_FILE}.part" "${MMPROJ_URL}"
-    mv "models/${MMPROJ_FILE}.part" "models/${MMPROJ_FILE}"
 fi
 
 NAME="${NAME:-llama-turboquant}"
@@ -104,8 +86,13 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
+    --spec-type draft-mtp,ngram-mod \
+    --spec-draft-n-max 3 \
+    --spec-ngram-mod-n-match 24 \
+    --spec-ngram-mod-n-min 4 \
+    --spec-ngram-mod-n-max 48 \
     -b 1024 \
-    -ub 256 \
+    -ub 512 \
     --cache-idle-slots \
     --cache-ram 16384 \
     --cache-reuse 256 \

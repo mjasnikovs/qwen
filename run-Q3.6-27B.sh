@@ -48,7 +48,7 @@ docker create \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
     --split-mode layer \
-    --tensor-split 46,19 \
+    --tensor-split 40,25 \
     -fit off \
     --flash-attn on \
     -c 120000 \
@@ -74,10 +74,10 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 512 \
-    -ub 256 \
+    -b 1024 \
+    -ub 512 \
     --cache-idle-slots \
-    --cache-ram 8192 \
+    --cache-ram 16384 \
     --cache-reuse 256 \
     --threads 8 \
     --cpu-range 0-7 \

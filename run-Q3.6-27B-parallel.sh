@@ -90,6 +90,7 @@ docker create \
     --spec-ngram-mod-n-match 24 \
     --spec-ngram-mod-n-min 4 \
     --spec-ngram-mod-n-max 48 \
+    -ctxcp 0 \
     --temp 0.7 \
     --top-p 0.8 \
     --top-k 20 \
@@ -99,7 +100,7 @@ docker create \
     -b 512 \
     -ub 256 \
     --cache-idle-slots \
-    --cache-ram 8192 \
+    --cache-ram 16384 \
     --cache-reuse 256 \
     --threads 8 \
     --cpu-range 0-7 \
