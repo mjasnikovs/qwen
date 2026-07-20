@@ -16,6 +16,7 @@ ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VER
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
 # Pin to a feature/turboquant-kv-cache tip; override at build time if needed.
+# patches/ is applied on top of this ref -- see patches/README.md.
 ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
 ARG TURBOQUANT_BRANCH=feature/turboquant-kv-cache
 ARG TURBOQUANT_REF=30d6881eb97be0844b77ff7bc93175e15972d689
@@ -37,6 +38,7 @@ ARG TURBOQUANT_REPO
 ARG TURBOQUANT_BRANCH
 ARG TURBOQUANT_REF
 ARG CUDA_DOCKER_ARCH
+ARG BUILD_JOBS
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
@@ -46,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 
 WORKDIR /src
+COPY patches/ /patches/
 RUN git clone --filter=blob:none --branch "${TURBOQUANT_BRANCH}" "${TURBOQUANT_REPO}" . \
     && git checkout "${TURBOQUANT_REF}" \
     && git log -1 --format='build commit: %H %s' \
@@ -53,7 +56,11 @@ RUN git clone --filter=blob:none --branch "${TURBOQUANT_BRANCH}" "${TURBOQUANT_R
     # bundle dropped it -> UI provisioning fails. Drop the stale required-check;
     # all present assets (index.html, bundle, sw.js, ...) still embed normally.
     && sed -i '/{ "loading.html",/d' tools/ui/embed.cpp \
-    && ! grep -q '"loading.html"' tools/ui/embed.cpp
+    && ! grep -q '"loading.html"' tools/ui/embed.cpp \
+    # Fork-local fixes not yet upstream. These are pinned against TURBOQUANT_REF --
+    # `git apply` fails the build on a REF bump so a stale patch is never silently
+    # skipped; re-check against the new ref before bumping.
+    && git apply --verbose /patches/*.patch
 
 RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \
@@ -68,7 +75,7 @@ RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         -DLLAMA_CURL=ON \
         ${EXTRA_CMAKE_ARGS} \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined && \
-    cmake --build build --config Release -j"$(nproc)" --target llama-server
+    cmake --build build --config Release -j"${BUILD_JOBS}" --target llama-server
 
 RUN mkdir -p /out/lib /out/bin && \
     find build -name "*.so*" -exec cp -P {} /out/lib/ \; && \

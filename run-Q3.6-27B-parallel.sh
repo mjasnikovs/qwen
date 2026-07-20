@@ -19,6 +19,7 @@ cd "$(dirname "$0")"
 # overlap in the pipeline (GPU1 runs one slot's late layers while GPU0 runs the
 # other slot's early layers), raising aggregate GPU utilization and total
 # throughput. Per-request latency is unchanged.
+# -ctxcp 0 \
 
 export CUDA_MALLOC_ASYNC_SUPPORTED=1
 export GGML_CUDA_FORCE_MMQ=1
@@ -90,7 +91,6 @@ docker create \
     --spec-ngram-mod-n-match 24 \
     --spec-ngram-mod-n-min 4 \
     --spec-ngram-mod-n-max 48 \
-    -ctxcp 0 \
     --temp 0.7 \
     --top-p 0.8 \
     --top-k 20 \
