@@ -2,31 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Parallel variant of run-Q3.6-27B.sh.
-#
-# Difference vs the base script: --parallel 2 with a NON-unified KV cache, so
-# the server exposes TWO independent sequence slots, each with a FULL 120k
-# context. --parallel splits total -c evenly across slots, so -c is set to
-# 240000 (2 x 120000) to give every slot an independent 120k window.
-#
-# WARNING: this DOUBLES the KV-cache VRAM vs the base config (which fits ~tight
-# on the 16GB card at 120k q8_0/turbo3). Two independent 120k contexts may OOM
-# on this rig -- launch and check VRAM before relying on it. Levers if it does
-# not fit: lower CONTEXT, or drop -ctk/-ctv to a smaller quant (turbo2).
-#
-# Why parallel at all: with --split-mode layer a single request pipelines
-# across both GPUs and each card averages ~50% util. Two concurrent requests
-# overlap in the pipeline (GPU1 runs one slot's late layers while GPU0 runs the
-# other slot's early layers), raising aggregate GPU utilization and total
-# throughput. Per-request latency is unchanged.
-# -ctxcp 0 \
-
 export CUDA_MALLOC_ASYNC_SUPPORTED=1
 export GGML_CUDA_FORCE_MMQ=1
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
-NETWORK="${NETWORK:-runner-network}"
+NETWORK="${NETWORK:-host}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 # 65 layers
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-27B-NVFP4-MTP.gguf}"
@@ -56,9 +37,7 @@ docker create \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
     -e TURBO_AUTO_ASYMMETRIC=0 \
-    -p "${HOST_PORT}:8080" \
     --network "${NETWORK}" \
-    --ip "${STATIC_IP}" \
     -v "$(pwd)/models:/models:ro" \
     -v "$(pwd)/scripts:/scripts:ro" \
     --entrypoint /scripts/entrypoint.sh \
@@ -97,8 +76,8 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 512 \
-    -ub 256 \
+    -b 2048 \
+    -ub 512 \
     --cache-idle-slots \
     --cache-ram 16384 \
     --cache-reuse 256 \

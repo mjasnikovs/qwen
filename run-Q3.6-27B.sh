@@ -7,12 +7,17 @@ export GGML_CUDA_FORCE_MMQ=1
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"
-NETWORK="${NETWORK:-runner-network}"
+NETWORK="${NETWORK:-host}"
 STATIC_IP="${STATIC_IP:-172.18.0.10}"
 # 65 layers
 MODEL_FILE="${MODEL_FILE:-Qwen3.6-27B-NVFP4-MTP.gguf}"
 MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.6-27B-F16.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
+
+# Number of independent context slots and total context (split across slots).
+# CONTEXT is total; each slot gets CONTEXT/PARALLEL. 240000/2 => 120k per slot.
+PARALLEL="${PARALLEL:-4}"
+CONTEXT="${CONTEXT:-140000}"
 
 NAME="${NAME:-llama-turboquant}"
 
@@ -32,9 +37,7 @@ docker create \
     --ulimit memlock=-1:-1 \
     --ulimit core=0 \
     -e TURBO_AUTO_ASYMMETRIC=0 \
-    -p "${HOST_PORT}:8080" \
     --network "${NETWORK}" \
-    --ip "${STATIC_IP}" \
     -v "$(pwd)/models:/models:ro" \
     -v "$(pwd)/scripts:/scripts:ro" \
     --entrypoint /scripts/entrypoint.sh \
@@ -48,17 +51,17 @@ docker create \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
     --split-mode layer \
-    --tensor-split 40,25 \
+    --tensor-split 39,26 \
     -fit off \
     --flash-attn on \
-    -c 120000 \
+    -c "${CONTEXT}" \
     -n -1 \
-    --parallel 1 \
-    -ctk q8_0 \
-    -ctv turbo3 \
-    -ctkd q8_0 \
-    -ctvd turbo3 \
+    --parallel "${PARALLEL}" \
     --kv-unified \
+    -ctk q8_0 \
+    -ctv q8_0 \
+    -ctkd q8_0 \
+    -ctvd q8_0 \
     --no-mmap \
     --mlock \
     --jinja \
@@ -74,7 +77,7 @@ docker create \
     --min-p 0.0 \
     --presence-penalty 1.5 \
     --repeat-penalty 1.0 \
-    -b 1024 \
+    -b 2048 \
     -ub 512 \
     --cache-idle-slots \
     --cache-ram 16384 \
