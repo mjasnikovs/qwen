@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
-# Builds llama-server (CUDA) from TheTom/llama-cpp-turboquant
-# which adds turbo3/turbo4 KV cache quant types on top of upstream llama.cpp.
+# Builds llama-server (CUDA) from upstream ggml-org/llama.cpp.
 #
-# Uses the fork's default feature/turboquant-kv-cache branch: turboquant (turbo2/3/4)
-# KV cache types with Qwen3 MTP speculative decoding, continuously synced from
-# upstream llama.cpp master. No manual PR merge or arg.cpp patching needed.
+# Previously built TheTom/llama-cpp-turboquant for its turbo2/3/4 KV cache types.
+# Upstream now carries the speculative-decoding stack this box relies on
+# (--spec-type draft-mtp/draft-dflash/ngram-mod, -ctkd/-ctvd), so the fork is gone.
+# What upstream does NOT have: the turbo* KV cache types. Allowed -ctk/-ctv values
+# are f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1 -- run scripts passing
+# turbo3 will be rejected at startup.
 
 ARG UBUNTU_VERSION=24.04
 # CUDA 13.3 matches the host driver (610.x advertises CUDA 13.3) and has native
@@ -15,11 +17,11 @@ ARG CUDA_VERSION=13.3.0
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
-# Pin to a feature/turboquant-kv-cache tip; override at build time if needed.
-# patches/ is applied on top of this ref -- see patches/README.md.
-ARG TURBOQUANT_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
-ARG TURBOQUANT_BRANCH=feature/turboquant-kv-cache
-ARG TURBOQUANT_REF=30d6881eb97be0844b77ff7bc93175e15972d689
+# Pin to an upstream master commit; override at build time if needed.
+# ee0445c9 == release tag b10241 (2026-08-03).
+ARG LLAMA_REPO=https://github.com/ggml-org/llama.cpp.git
+ARG LLAMA_BRANCH=master
+ARG LLAMA_REF=ee0445c99cffbe8d920b05cad28cb055d7049c0a
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
@@ -34,9 +36,9 @@ ARG BUILD_JOBS=4
 # Build stage
 ############################
 FROM ${BASE_CUDA_DEV_CONTAINER} AS build
-ARG TURBOQUANT_REPO
-ARG TURBOQUANT_BRANCH
-ARG TURBOQUANT_REF
+ARG LLAMA_REPO
+ARG LLAMA_BRANCH
+ARG LLAMA_REF
 ARG CUDA_DOCKER_ARCH
 ARG BUILD_JOBS
 
@@ -48,19 +50,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 
 WORKDIR /src
-COPY patches/ /patches/
-RUN git clone --filter=blob:none --branch "${TURBOQUANT_BRANCH}" "${TURBOQUANT_REPO}" . \
-    && git checkout "${TURBOQUANT_REF}" \
-    && git log -1 --format='build commit: %H %s' \
-    # tqp-v0.3.0 embed.cpp still requires loading.html, but the current llama-ui
-    # bundle dropped it -> UI provisioning fails. Drop the stale required-check;
-    # all present assets (index.html, bundle, sw.js, ...) still embed normally.
-    && sed -i '/{ "loading.html",/d' tools/ui/embed.cpp \
-    && ! grep -q '"loading.html"' tools/ui/embed.cpp \
-    # Fork-local fixes not yet upstream. These are pinned against TURBOQUANT_REF --
-    # `git apply` fails the build on a REF bump so a stale patch is never silently
-    # skipped; re-check against the new ref before bumping.
-    && git apply --verbose /patches/*.patch
+RUN git clone --filter=blob:none --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" . \
+    && git checkout "${LLAMA_REF}" \
+    && git log -1 --format='build commit: %H %s'
 
 RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \

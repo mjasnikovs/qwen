@@ -45,8 +45,7 @@ docker create \
     --model "/models/${MODEL_FILE}" \
     --mmproj "/models/${MMPROJ_FILE}" \
     --mmproj-offload \
-    --host 0.0.0.0 \
-    --port 8080 \
+    --image-min-tokens 1024 \
     --metrics \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
@@ -57,14 +56,14 @@ docker create \
     -c "${CONTEXT}" \
     -n -1 \
     --parallel "${PARALLEL}" \
-    -ctk q8_0 \
-    -ctv turbo3 \
-    -ctkd q8_0 \
-    -ctvd turbo3 \
-    --no-mmap \
-    --mlock \
+    -ctk q4_0 \
+    -ctv q4_0 \
+    -ctkd q4_0 \
+    -ctvd q4_0 \
+    --load-mode mlock \
     --jinja \
     --reasoning off \
+    --reasoning-preserve \
     --spec-type draft-mtp,ngram-mod \
     --spec-draft-n-max 3 \
     --spec-ngram-mod-n-match 24 \
@@ -79,8 +78,7 @@ docker create \
     -b 2048 \
     -ub 512 \
     --cache-idle-slots \
-    --cache-ram 16384 \
-    --cache-reuse 256 \
+    --cache-ram 8192 \
     --threads 8 \
     --cpu-range 0-7 \
     --timeout 360 \

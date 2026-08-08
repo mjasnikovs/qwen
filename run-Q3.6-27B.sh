@@ -14,10 +14,8 @@ MODEL_FILE="${MODEL_FILE:-Qwen3.6-27B-NVFP4-MTP.gguf}"
 MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.6-27B-F16.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
 
-# Number of independent context slots and total context (split across slots).
-# CONTEXT is total; each slot gets CONTEXT/PARALLEL. 240000/2 => 120k per slot.
-PARALLEL="${PARALLEL:-4}"
-CONTEXT="${CONTEXT:-140000}"
+PARALLEL="${PARALLEL:-1}"
+CONTEXT="${CONTEXT:-120000}"
 
 NAME="${NAME:-llama-turboquant}"
 
@@ -45,8 +43,7 @@ docker create \
     --model "/models/${MODEL_FILE}" \
     --mmproj "/models/${MMPROJ_FILE}" \
     --mmproj-offload \
-    --host 0.0.0.0 \
-    --port 8080 \
+    --image-min-tokens 1024 \
     --metrics \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
@@ -62,10 +59,10 @@ docker create \
     -ctv q8_0 \
     -ctkd q8_0 \
     -ctvd q8_0 \
-    --no-mmap \
-    --mlock \
+    --load-mode mlock \
     --jinja \
     --reasoning off \
+    --reasoning-preserve \
     --spec-type draft-mtp,ngram-mod \
     --spec-draft-n-max 3 \
     --spec-ngram-mod-n-match 24 \
@@ -80,8 +77,7 @@ docker create \
     -b 2048 \
     -ub 512 \
     --cache-idle-slots \
-    --cache-ram 16384 \
-    --cache-reuse 256 \
+    --cache-ram 8192 \
     --threads 8 \
     --cpu-range 0-7 \
     --timeout 360 \

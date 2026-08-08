@@ -153,7 +153,7 @@ docker create \
     -b 2048 \
     -ub 1024 \
     --cache-idle-slots \
-    --cache-ram 16384 \
+    --cache-ram 8192 \
     --cache-reuse 256 \
     --threads 8 \
     --cpu-range 0-7 \
