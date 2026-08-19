@@ -1,0 +1,1 @@
+Scaffold single-package project — package.json deps (hono, zod, sharp, react 19.2.7, wouter, tailwindcss 4.3.2, playwright 1.61.1), .env with DATABASE_URL/APP_URL/PORT/ADMIN_PHONE/ADMIN_PASSWORD, docker-compose.dev.yml Postgres 18 | spec: @DESIGN/PROJECT.md — otherwise authoritative; read it and follow it over this title wherever they differ

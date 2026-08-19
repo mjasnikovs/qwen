@@ -30,6 +30,8 @@ if [[ -n "${LLAMA_REF}" ]]; then
 fi
 
 # ccache lives in a BuildKit cache mount, so BuildKit is required (not legacy builder).
+# The cache survives image rebuilds and LLAMA_REF bumps. To wipe it:
+#   docker builder prune --filter type=exec.cachemount
 DOCKER_BUILDKIT=1 docker build \
     "${args[@]}" \
     -t "${IMAGE}" \

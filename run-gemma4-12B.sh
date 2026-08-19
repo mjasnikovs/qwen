@@ -2,13 +2,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Gemma 4 12B QAT (UD-Q4_K_XL) + MTP drafter, single GPU: RTX 4070 SUPER (12 GB).
+# Gemma 4 12B QAT (UD-Q4_K_XL) + MTP drafter, single GPU: RTX 5070 Ti (16 GB).
 #
-# CUDA_DEVICE_ORDER=PCI_BUS_ID + CUDA_VISIBLE_DEVICES=0 pins this to the
-# 4070 SUPER (PCI 25:00.0). The 5070 Ti is deliberately NOT exposed, so nothing
-# can spill onto it. See run-Q3.6-27B.sh for the two-GPU layout.
+# CUDA_DEVICE_ORDER=PCI_BUS_ID + CUDA_VISIBLE_DEVICES=1 pins this to the
+# 5070 Ti (PCI 26:00.0), the faster card. The 4070 SUPER (PCI 25:00.0) is
+# deliberately NOT exposed, so nothing can spill onto it. Inside the container
+# the 5070 Ti is the only visible device, so --main-gpu 0 still refers to it.
+# See run-Q3.6-27B.sh for the two-GPU layout.
 #
-# Weights 6.7 GB + drafter 0.25 GB leaves ~4.5 GB for KV + compute buffers.
+# Weights 6.7 GB + drafter 0.25 GB leaves ~8.5 GB for KV + compute buffers.
 # Gemma 4 is 48 layers with 1024-token sliding-window attention on most of them
 # (only the global layers hold a full-context KV), so the cache is cheap; the
 # 262k vocab makes the logits buffer the other big consumer -- that scales with
@@ -19,12 +21,14 @@ cd "$(dirname "$0")"
 #   -c  65536 ->  8154 MiB used  (default here)
 #   -c 131072 ->  9082 MiB used
 #   -c 262144 -> 10948 MiB peak under a 234k-token prefill (no OOM, ~1.3 GB spare)
-# 262144 works but leaves little room for anything else on the card; raise
-# CONTEXT to it only when the desktop is idle.
+# The 5070 Ti has 16303 MiB, so 262144 now has ~5 GB of headroom instead of 1.3.
+# VRAM figures above are 4070 SUPER measurements and have not been re-measured
+# on the 5070 Ti; they are an upper bound, not a prediction.
 #
-# Measured throughput at short context: prefill ~930 t/s, decode ~140 tok/s with
-# MTP draft acceptance ~0.75. At a 234k-token prompt: prefill 926 t/s, decode
-# ~33 tok/s (acceptance drops to ~0.5).
+# Measured throughput on the 4070 SUPER at short context: prefill ~930 t/s,
+# decode ~140 tok/s with MTP draft acceptance ~0.75. At a 234k-token prompt:
+# prefill 926 t/s, decode ~33 tok/s (acceptance drops to ~0.5). The 5070 Ti
+# should be faster; not yet measured.
 
 export CUDA_MALLOC_ASYNC_SUPPORTED=1
 export GGML_CUDA_FORCE_MMQ=1
@@ -53,7 +57,7 @@ docker create \
     --restart=unless-stopped \
     --gpus all \
     -e CUDA_DEVICE_ORDER=PCI_BUS_ID \
-    -e CUDA_VISIBLE_DEVICES=0 \
+    -e CUDA_VISIBLE_DEVICES=1 \
     --memory=30g \
     --memory-swap=46g \
     --cap-add=IPC_LOCK \

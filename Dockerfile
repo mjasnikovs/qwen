@@ -18,10 +18,17 @@ ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VER
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
 # Pin to an upstream master commit; override at build time if needed.
-# ee0445c9 == release tag b10241 (2026-08-03).
+# 6d054983 == release tag b10499 (2026-08-19), 29 commits past b10470. Tagged
+# releases only. Nothing in that range touches the CUDA decode path for this
+# box: the one CUDA kernel change (#26843, MMVQ nwarps=8) is a bs=1 dense-model
+# tune, the rest is CI, webui refactors, mtmd/vision, SYCL/OpenCL/RPC, a ggml
+# 0.20.2 sync and a quantize-tool memory fix. Two to watch: #27138 shares
+# thread pools when n_threads differ (common/), and b10453's earlier move of
+# common_speculative_process into a yield_to_queue worker thread (#27133) is
+# still in -- watch decode throughput on the spec-decode run scripts.
 ARG LLAMA_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_BRANCH=master
-ARG LLAMA_REF=ee0445c99cffbe8d920b05cad28cb055d7049c0a
+ARG LLAMA_REF=6d05498314db1b57f81c271080018aa2d0b89be9
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
@@ -44,19 +51,34 @@ ARG BUILD_JOBS
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
+        ccache \
         libssl-dev libgomp1 libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
+# ccache is what makes a LLAMA_REF bump cheap. Bumping the ref busts the clone
+# layer and therefore the build layer, so cmake always re-runs -- but most .cu
+# files are byte-identical between two nearby upstream commits, so ccache serves
+# them from the BuildKit cache mount instead of paying nvcc twice (sm_120+sm_89).
+# base_dir + the sloppiness flags are required for hits: sources live under a
+# path that changes between builds, and nvcc emits __TIME__-style noise that
+# would otherwise defeat the hash.
+ENV CCACHE_DIR=/ccache \
+    CCACHE_BASEDIR=/src \
+    CCACHE_COMPILERCHECK=content \
+    CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,locale,random_seed \
+    CCACHE_MAXSIZE=15G
 
 WORKDIR /src
 RUN git clone --filter=blob:none --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" . \
     && git checkout "${LLAMA_REF}" \
     && git log -1 --format='build commit: %H %s'
 
-RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
+RUN --mount=type=cache,target=/ccache,sharing=locked \
+    if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         EXTRA_CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=${CUDA_DOCKER_ARCH}"; \
     fi && \
+    ccache --zero-stats && \
     cmake -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_NATIVE=OFF \
@@ -65,9 +87,13 @@ RUN if [ "${CUDA_DOCKER_ARCH}" != "default" ]; then \
         -DGGML_CPU_ALL_VARIANTS=ON \
         -DLLAMA_BUILD_TESTS=OFF \
         -DLLAMA_CURL=ON \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
         ${EXTRA_CMAKE_ARGS} \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined && \
-    cmake --build build --config Release -j"${BUILD_JOBS}" --target llama-server
+    cmake --build build --config Release -j"${BUILD_JOBS}" --target llama-server && \
+    ccache --show-stats
 
 RUN mkdir -p /out/lib /out/bin && \
     find build -name "*.so*" -exec cp -P {} /out/lib/ \; && \
