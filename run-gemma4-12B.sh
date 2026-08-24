@@ -30,8 +30,12 @@ cd "$(dirname "$0")"
 # prefill 926 t/s, decode ~33 tok/s (acceptance drops to ~0.5). The 5070 Ti
 # should be faster; not yet measured.
 
-export CUDA_MALLOC_ASYNC_SUPPORTED=1
-export GGML_CUDA_FORCE_MMQ=1
+# No env exports here. Verified 2026-08-24 against the pinned llama.cpp ref:
+#   CUDA_MALLOC_ASYNC_SUPPORTED -- not read by llama.cpp/ggml at all.
+#   GGML_CUDA_FORCE_MMQ         -- compile-time cmake option now, not an
+#                                  env var (ggml/CMakeLists.txt, default OFF).
+# Both were also never reaching the container: docker create only forwards
+# the -e flags listed below, not the host shell's exports.
 
 IMAGE="${IMAGE:-llama-turboquant:cuda}"
 HOST_PORT="${HOST_PORT:-8080}"

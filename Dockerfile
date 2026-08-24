@@ -18,17 +18,18 @@ ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VER
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
 # Pin to an upstream master commit; override at build time if needed.
-# 6d054983 == release tag b10499 (2026-08-19), 29 commits past b10470. Tagged
-# releases only. Nothing in that range touches the CUDA decode path for this
-# box: the one CUDA kernel change (#26843, MMVQ nwarps=8) is a bs=1 dense-model
-# tune, the rest is CI, webui refactors, mtmd/vision, SYCL/OpenCL/RPC, a ggml
-# 0.20.2 sync and a quantize-tool memory fix. Two to watch: #27138 shares
-# thread pools when n_threads differ (common/), and b10453's earlier move of
-# common_speculative_process into a yield_to_queue worker thread (#27133) is
-# still in -- watch decode throughput on the spec-decode run scripts.
+# a130532a == release tag b10605 (2026-08-24), 17 commits past b10588.
+# Reviewed the whole range; nothing lands on this box's hot paths.
+# Worth watching on the first run:
+#  - #27594 mtmd: pillow-accurate resize algo, corrected for all models. This
+#    CHANGES image preprocessing, so vision output can differ from b10588.
+#  - #27574 tensor-parallel meta split-state fix. We run -sm layer, so this is
+#    only relevant if we ever try -sm tensor again (we won't, it lost).
+#  - #27573 CUDA POOL_1D support.
+# The rest is webui tabs, CI, tests, DeepSeek/GLM/mamba2 model work.
 ARG LLAMA_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_BRANCH=master
-ARG LLAMA_REF=6d05498314db1b57f81c271080018aa2d0b89be9
+ARG LLAMA_REF=a130532ae1c4c54daaae5527795f5b19c184f269
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
@@ -48,6 +49,8 @@ ARG LLAMA_BRANCH
 ARG LLAMA_REF
 ARG CUDA_DOCKER_ARCH
 ARG BUILD_JOBS
+ARG DFLASH_PR
+ARG DFLASH_REF
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
@@ -70,8 +73,33 @@ ENV CCACHE_DIR=/ccache \
     CCACHE_MAXSIZE=15G
 
 WORKDIR /src
+# ONE image, not two. The old Dockerfile.dflash2 existed only because DFlash2
+# lives in an unmerged PR. Instead of a second image we merge that PR into the
+# pinned upstream ref, so this single build serves every run script:
+#   - DFlash2 is opt-in at runtime (--spec-type draft-dflash). Nothing else in
+#     the binary changes, so the non-DFlash runs are unaffected.
+#   - PR #27342 is still OPEN. Its head moved to 64f765f5 (12 commits, last
+#     2026-08-24): a refactor, p_min, cost optimisation, and a top_k selector
+#     move. The merge into b10605 is clean (verified 2026-08-24, no conflicts).
+# patches/0001-dflash-dense-inject-pos-for-vision.patch is @Shamish's community
+# fix from PR #27342, never merged into the PR head. Without it, any request
+# carrying an image dies with `llama_decode(ctx_dft) failed rc=-1`: the DFlash
+# inject batch copies the target's M-RoPE positions verbatim, and ctx_dft
+# (plain qwen3, n_pos_per_embd == 1) demands continuous positions.
+# The PR's own refactor moved that loop, so the patch was RE-AUTHORED against
+# head 64f765f5 on 2026-08-24; the old 1deefcca version no longer applies. The
+# fix is still NOT in the PR head, so we still carry it.
+# On every LLAMA_REF or PR bump: re-check that the merge is clean and the patch
+# still applies. Drop DFLASH_PR and the patch once the PR lands upstream.
+ARG DFLASH_PR=27342
+ARG DFLASH_REF=64f765f5adefa4620dddda436ce56f1430435536
+COPY patches/ /patches/
 RUN git clone --filter=blob:none --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" . \
     && git checkout "${LLAMA_REF}" \
+    && git fetch origin "pull/${DFLASH_PR}/head" \
+    && git -c user.email=build@local -c user.name=build \
+           merge --no-edit "${DFLASH_REF}" \
+    && git apply --verbose /patches/*.patch \
     && git log -1 --format='build commit: %H %s'
 
 RUN --mount=type=cache,target=/ccache,sharing=locked \
