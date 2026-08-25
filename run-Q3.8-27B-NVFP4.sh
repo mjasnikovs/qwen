@@ -22,10 +22,10 @@ cd "$(dirname "$0")"
 # block in one pass and keeps top candidates per position.
 #
 # DFlash2 is not in upstream llama.cpp -- it is PR #27342, STILL OPEN as of
-# 2026-08-24 (head 64f765f5, merged into upstream b10605). There is no separate
+# 2026-08-25 (head f7aadef0, merged into upstream b10605). There is no separate
 # dflash2 image: the single Dockerfile merges that PR into the pinned upstream
-# ref and applies patches/*.patch (the vision fix, see VISION below).
-# llama-turboquant:cuda is the patched DFlash2 build.
+# ref. patches/ is now EMPTY -- the local vision patch was dropped, see VISION.
+# llama-turboquant:cuda is that merged DFlash2 build.
 # Roll back with IMAGE=llama-turboquant:prev-dflash2 (the last two-image build),
 # or IMAGE=llama-turboquant:prev plus the old --spec-type draft-mtp,ngram-mod
 # block (see git history).
@@ -38,40 +38,66 @@ cd "$(dirname "$0")"
 # Draft width swept: n-max 4 wins prose by 21% over 7; 10 wins code but costs
 # another 15% prefill. 4 is the pick for reasoning-heavy work.
 #
+# 39,26 trialled 2026-08-25 and REJECTED: it buys ~220 MiB more headroom on the
+# main GPU but decode is a wash (92.1/72.0/75.3/70.7 vs 91.8/74.7/75.7/70.8 for
+# text/image/text-after-image/3-image), accept rates identical, and the image
+# turn is ~4% slower. 40,25 already holds VRAM steady through a 3-image 9k-token
+# request, so there is nothing to buy. Do not re-walk this.
 # --tensor-split moved 43,22 -> 40,25: the 1.14 GB sidecar plus the 888 MiB
 # mmproj no longer fit on the 5070 Ti at 43. Not a DFlash/vision incompatibility,
 # just VRAM -- 40,25 loads vision AND the sidecar at the full 120k.
 #
 # VISION
 # ------
-# Images WORK, but they cost all the drafting. Measured cold on this box
-# (2026-08-21, temp 0), decode tok/s, this config vs the same binary running
-# --spec-type draft-mtp,ngram-mod --spec-draft-n-max 6 at --tensor-split 43,22:
+# FIXED 2026-08-25. Images now speculate properly. Measured on this box,
+# temp 0, 2898x1068 png (~2.9k image tokens, 91-position span), ctx 120000:
 #
-#              draft-dflash   draft-mtp
-#   code            94.6         65.2
-#   prose           58.7         41.6
-#   image           35.0         47.3
-#   text turn after
-#   an image        34.8         49.7
+#                     PR head only   + #27408 patch
+#   text only         83.6% / 96.3   83.6% / 91.8
+#   image turn         0.2% / 22.4   59.1% / 74.7
+#   text after image   7.4% / 27.4   52.5% / 75.7
+#   3 images, 9k tok        --       56.2% / 70.8
 #
-# Unpatched, an image request does not just slow down -- it ABORTS with
-# `process: llama_decode(ctx_dft) failed rc=-1`. The DFlash inject batch copied
-# the target's positions verbatim, but a multimodal target batch is M-RoPE and an
-# image span repeats one temporal position, while ctx_dft (plain qwen3,
-# n_pos_per_embd == 1) demands continuous positions.
-# patches/0001-dflash-dense-inject-pos-for-vision.patch (the community fix from
-# PR #27342, NOT merged into the PR head) numbers the injected rows densely and
-# the request completes correctly.
+# (draft accept % / decode tok/s). Zero llama_decode errors, vision output
+# verified correct. For scale: the old broken setup did 35.0 on images and
+# draft-mtp 47.3, so dflash now wins images too. The old "switch to draft-mtp
+# for image workloads" advice is DEAD.
 #
-# What the patch does NOT fix: draft() still positions its block at the target's
-# TOKEN count while the draft KV ends at the target's M-RoPE position, so every
-# draft decode fails and the log fills with `draft: llama_decode returned -1`.
-# The answer is correct, just unaccelerated, for the WHOLE chat once an image is
-# in it. If images are the main workload, switch to draft-mtp.
-# RE-MEASURED 2026-08-24 on b10605 + PR head 64f765f5: unchanged. Image turn and
-# the text turn after it both run 34.8 tok/s with draft_n = 0, and the follow-up
-# turn added 86 more `llama_decode returned -1` lines. Still open.
+# THE HISTORY, because the trap here is subtle.
+# Raw upstream: an image request ABORTED with `llama_decode(ctx_dft) rc=-1`.
+# A multimodal target batch is M-RoPE and an image span repeats one temporal
+# position, which the draft context rejected as non-consecutive.
+# The PR head's own f5a7ec15 makes the draft M-RoPE and passes 4 position rows.
+# That stops the abort but is only HALF a fix: draft() still bases its noise
+# block on dp.n_past, the TOKEN count, while the draft cache runs on the
+# POSITION scale. An N-row image is N tokens but only ~grid_height positions,
+# so the two diverge forever. Result: no crash, no errors, and 0.2% acceptance.
+# patches/0001-dflash-mtmd-zero-fill-draft-cache.patch is the complete fix from
+# upstream issue #27408 (@fishlikeX, fork commit 3e008b22, never opened as a
+# PR): process() SKIPS embedding batches, zero-fills the hole they leave with
+# zero-feature encoder rows, and draft() bases the noise block on the draft
+# cache's own pos_max + 1. Look for one `zero-filled N draft-cache hole rows`
+# per image in the log -- that is the fix working, not a problem.
+# Their diff does NOT apply as-is: their base predates the PR's process()
+# refactor. All three hunks were re-authored, and f5a7ec15's M-RoPE handling
+# was kept inside the zero-fill path so the patch works with either draft gguf.
+#
+# DRAFT GGUF: either file works now. The -mrope one below is converted locally
+# and carries dflash.rope.dimension_sections; the published GGUFs do not (see
+# patches/README.md). With the #27408 patch that key no longer decides whether
+# vision works, so treat it as belt-and-braces.
+#
+# Two dead ends, recorded so nobody re-walks them:
+#   - `--swa-full` was REQUIRED with the f5a7ec15-only build. The draft has
+#     sliding_window 2048 on all 5 layers, an image span holds the position
+#     constant, the window never slides, and the cache never frees cells:
+#     `failed to find a memory slot for batch of size 512`. The #27408 patch
+#     skips embedding batches entirely, so the flag is NOT needed any more.
+#     Verified 2026-08-25 at ctx 120000 without it.
+#   - ctx had to drop to 65536 with the f5a7ec15-only build: the draft's CUDA
+#     pool growth starved the vision encoder and clip_encode OOM'd at 120000.
+#     Also gone. 120000 holds, ~590 MiB free on the main GPU after a 3-image
+#     9k-token request, and VRAM stops growing there.
 #
 # Alternatives measured and rejected 2026-08-21: draft-dspark (slower -- 79/35
 # vs 95/59 -- and does not fit at -c 120000), swapping the ngram type (no effect;
@@ -113,7 +139,7 @@ STATIC_IP="${STATIC_IP:-172.18.0.10}"
 # 65 blocks (64 layers + 1 MTP)
 MODEL_FILE="${MODEL_FILE:-Qwen3.8-27B-NVFP4-MTP-VERY-HIGH.gguf}"
 MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.8-27B-NVFP4-BF16.gguf}"
-DRAFT_FILE="${DRAFT_FILE:-Qwen3.8-27B-DFlash2-Q4_K_M.gguf}"
+DRAFT_FILE="${DRAFT_FILE:-Qwen3.8-27B-DFlash2-Q4_K_M-mrope.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
 
 PARALLEL="${PARALLEL:-1}"

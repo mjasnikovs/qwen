@@ -78,21 +78,41 @@ WORKDIR /src
 # pinned upstream ref, so this single build serves every run script:
 #   - DFlash2 is opt-in at runtime (--spec-type draft-dflash). Nothing else in
 #     the binary changes, so the non-DFlash runs are unaffected.
-#   - PR #27342 is still OPEN. Its head moved to 64f765f5 (12 commits, last
-#     2026-08-24): a refactor, p_min, cost optimisation, and a top_k selector
-#     move. The merge into b10605 is clean (verified 2026-08-24, no conflicts).
-# patches/0001-dflash-dense-inject-pos-for-vision.patch is @Shamish's community
-# fix from PR #27342, never merged into the PR head. Without it, any request
-# carrying an image dies with `llama_decode(ctx_dft) failed rc=-1`: the DFlash
-# inject batch copies the target's M-RoPE positions verbatim, and ctx_dft
-# (plain qwen3, n_pos_per_embd == 1) demands continuous positions.
-# The PR's own refactor moved that loop, so the patch was RE-AUTHORED against
-# head 64f765f5 on 2026-08-24; the old 1deefcca version no longer applies. The
-# fix is still NOT in the PR head, so we still carry it.
-# On every LLAMA_REF or PR bump: re-check that the merge is clean and the patch
-# still applies. Drop DFLASH_PR and the patch once the PR lands upstream.
+#   - PR #27342 is still OPEN. Its head moved to f7aadef0 (14 commits, last
+#     2026-08-24): the two new commits over 64f765f5 are f5a7ec15 "Apply patch
+#     to fix the mrope bug" and f7aadef0 "fix ci". The merge into b10605 is
+#     clean (verified 2026-08-25, no conflicts).
+#
+# patches/0001-dflash-mtmd-zero-fill-draft-cache.patch is the COMPLETE vision
+# fix from upstream issue #27408 (@fishlikeX, fork commit 3e008b22, never turned
+# into a PR). The PR head's own f5a7ec15 is only half of it -- see VISION in
+# run-Q3.8-27B-NVFP4.sh and patches/README.md.
+# History: patches/0001-dflash-dense-inject-pos-for-vision.patch was @Shamish's
+# community workaround. It renumbered the DFlash inject batch densely from the
+# draft cache's own max position. That stopped the rc=-1 rejection, but only
+# for the inject batch: common_speculative_impl_draft_dflash::draft() still
+# positions its noise block at dp.n_past, which is the TARGET's position. So
+# every image silently desynced the two caches by its token span (1032 here:
+# --image-min-tokens 1024 + 8 markers) and drafting died with
+# "inconsistent sequence positions" for the rest of the conversation.
+# Upstream commit f5a7ec15 fixes it properly: it sets is_mrope from the DRAFT
+# model's rope type and feeds 4 position rows per token to both the encoder and
+# the inject batch, so the draft keeps the target's real positions and the two
+# caches stay in lockstep.
+#
+# THAT FIX IS GATED ON THE DRAFT GGUF. llama_model_rope_type() only returns
+# MROPE for LLM_ARCH_DFLASH when hparams.rope_sections is non-zero, and only a
+# converter at >= f5a7ec15 writes dflash.rope.dimension_sections (degenerate
+# [head_dim/2, 0, 0, 0]). The published z-lab/incoai DFlash2 GGUFs do NOT carry
+# it, so they silently fall back to the old broken path. The draft GGUF this
+# box runs is converted locally from z-lab/Qwen3.8-27B-DFlash2 safetensors --
+# see models/hf/ and the note in patches/README.md. If you ever swap in a
+# downloaded DFlash2 GGUF, check for dflash.rope.dimension_sections first.
+#
+# On every LLAMA_REF or PR bump: re-check that the merge is clean.
+# Drop DFLASH_PR entirely once the PR lands upstream.
 ARG DFLASH_PR=27342
-ARG DFLASH_REF=64f765f5adefa4620dddda436ce56f1430435536
+ARG DFLASH_REF=f7aadef0932e47d66a4349245957e81126a7c734
 COPY patches/ /patches/
 RUN git clone --filter=blob:none --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" . \
     && git checkout "${LLAMA_REF}" \
@@ -120,12 +140,13 @@ RUN --mount=type=cache,target=/ccache,sharing=locked \
         -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
         ${EXTRA_CMAKE_ARGS} \
         -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined && \
-    cmake --build build --config Release -j"${BUILD_JOBS}" --target llama-server && \
+    cmake --build build --config Release -j"${BUILD_JOBS}" --target llama-server llama-quantize && \
     ccache --show-stats
 
 RUN mkdir -p /out/lib /out/bin && \
     find build -name "*.so*" -exec cp -P {} /out/lib/ \; && \
-    cp build/bin/llama-server /out/bin/llama-server
+    cp build/bin/llama-server /out/bin/llama-server && \
+    cp build/bin/llama-quantize /out/bin/llama-quantize
 
 ############################
 # Runtime stage
@@ -140,6 +161,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /out/lib/ /app/
 COPY --from=build /out/bin/llama-server /app/llama-server
+# llama-quantize ships too: the DFlash2 draft has to be re-quantized locally
+# (see patches/README.md -- published DFlash2 GGUFs lack rope sections).
+COPY --from=build /out/bin/llama-quantize /app/llama-quantize
 
 ENV LD_LIBRARY_PATH=/app:${LD_LIBRARY_PATH}
 ENV LLAMA_ARG_HOST=0.0.0.0
