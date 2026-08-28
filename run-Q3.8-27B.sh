@@ -87,7 +87,8 @@ cd "$(dirname "$0")"
 #   - n-max 3 is upstream's default and the measured optimum. PR #27173 benchmarks
 #     this exact model (Qwen3.8-27B, draft-mtp, temp 0) and reports depth 3 best on
 #     stock upstream; depth 5 only wins with that PR's unmerged chain-draft patch
-#     (LLAMA_SPEC_CHAIN). It is open, not in b10453. Matches the 35B DFlash result:
+#     (LLAMA_SPEC_CHAIN). Still open, still not in LLAMA_REF (re-checked b10665,
+#     2026-08-28). Matches the 35B DFlash result:
 #     small n_max wins, deep drafts are a net loss.
 #   - The draft KV inherits -ctkd/-ctvd q8_0 already set below. Upstream default is
 #     f16, which costs VRAM this box does not have spare.

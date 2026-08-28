@@ -1,13 +1,29 @@
 # Patches
 
-**Empty on purpose.** The build is upstream `ggml-org/llama.cpp` at `LLAMA_REF`
-plus a clean merge of PR #27342 (DFlash2). Nothing is patched on top, and the
-`Dockerfile` no longer copies this directory.
+The build is plain upstream `ggml-org/llama.cpp` at `LLAMA_REF`, plus every
+`*.patch` in this directory. `git apply` runs inside the clone `RUN` chain's
+`&&` list on purpose — a stale patch then fails the build instead of being
+silently skipped.
 
-If you add a patch back, re-wire `COPY patches/ /patches/` plus
-`&& git apply --verbose /patches/*.patch` inside the clone `RUN` chain. Keeping
-it in the `&&` chain is deliberate — a stale patch then fails the build instead
-of being silently skipped.
+**No PR is merged in any more.** PR #27342 (DFlash2) landed upstream on
+2026-08-27 as `b10f9ca5` (squashed via #27816), so the old
+`git fetch pull/27342/head && git merge` step and the `DFLASH_PR`/`DFLASH_REF`
+build args are gone from the `Dockerfile`. Do not add them back.
+
+## Active: 0001-dflash-mtmd-zero-fill-draft-cache.patch
+
+The complete vision fix from upstream issue #27408 (@fishlikeX, fork commit
+`3e008b22`, never opened as a PR). It zero-fills the holes that skipped mtmd
+image chunks leave in the DFlash draft KV cache, via the same encode+inject path
+with all-zero features, so the draft and target caches stay position-aligned.
+
+**Still needed at `LLAMA_REF`.** Issue #27408 is still open and none of the
+zero-fill code is in upstream master — what came in with #27342 is only
+`f5a7ec15`, which is half of it (see below). Re-verified against `b10665` on
+2026-08-28: applies clean, 4 hunks, offset +18 lines.
+
+Drop this patch, the `COPY patches/` line and the `git apply` line once #27408
+lands upstream.
 
 ## Dropped: 0001-dflash-dense-inject-pos-for-vision.patch (2026-08-25)
 
@@ -25,8 +41,9 @@ draft decode failed with `inconsistent sequence positions`. Silent: llama-server
 just falls back to plain decode, so vision chats lost all speculative decoding
 and only the log showed it (40k errors in one 5-hour run).
 
-Superseded by upstream `f5a7ec15` ("Apply patch to fix the mrope bug"), in the
-PR head since 2026-08-24. It sets `is_mrope` from the **draft** model's rope type
+Superseded by upstream `f5a7ec15` ("Apply patch to fix the mrope bug"), which
+is now in master (it came in with #27342 on 2026-08-27) and no longer needs to
+be merged in. It sets `is_mrope` from the **draft** model's rope type
 and writes 4 position rows per token into both the DFlash encoder batch and the
 inject batch, so the draft carries the target's real M-RoPE positions and the two
 caches stay in lockstep.
@@ -42,7 +59,8 @@ incoai/Qwen3.8-27B-DFlash2-GGUF. With those, `is_mrope` is false, the fix is dea
 code, and vision requests go back to `rc=-1`.
 
 So the draft GGUF on this box is converted locally from the z-lab safetensors,
-with a converter from the merged PR head. Sources live in `models/hf/`.
+with a converter at >= `f5a7ec15` (now just upstream `LLAMA_REF`). Sources live
+in `models/hf/`.
 
 Before trusting any DFlash2 draft GGUF:
 

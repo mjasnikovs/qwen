@@ -21,11 +21,14 @@ cd "$(dirname "$0")"
 # instead of the baked-in MTP head. Block-diffusion drafter: it predicts a whole
 # block in one pass and keeps top candidates per position.
 #
-# DFlash2 is not in upstream llama.cpp -- it is PR #27342, STILL OPEN as of
-# 2026-08-25 (head f7aadef0, merged into upstream b10605). There is no separate
-# dflash2 image: the single Dockerfile merges that PR into the pinned upstream
-# ref. patches/ is now EMPTY -- the local vision patch was dropped, see VISION.
-# llama-turboquant:cuda is that merged DFlash2 build.
+# DFlash2 IS UPSTREAM NOW. PR #27342 landed 2026-08-27 as b10f9ca5 (squashed
+# via #27816) and is an ancestor of LLAMA_REF (b10665). The Dockerfile no longer
+# fetches or merges that PR -- it is plain upstream plus patches/. The image
+# still carries ONE local patch, the #27408 vision zero-fill; see VISION.
+# NOTE: the merged commit includes 11f45ed3 "Fix graph number calculation" and
+# 2f3923bc "rename hid and unary", which were NOT in the old pinned PR head
+# f7aadef0. Every acceptance and tok/s number below predates them. Re-measure.
+# llama-turboquant:cuda is that build.
 # Roll back with IMAGE=llama-turboquant:prev-dflash2 (the last two-image build),
 # or IMAGE=llama-turboquant:prev plus the old --spec-type draft-mtp,ngram-mod
 # block (see git history).
@@ -52,7 +55,7 @@ cd "$(dirname "$0")"
 # FIXED 2026-08-25. Images now speculate properly. Measured on this box,
 # temp 0, 2898x1068 png (~2.9k image tokens, 91-position span), ctx 120000:
 #
-#                     PR head only   + #27408 patch
+#                     f5a7ec15 only  + #27408 patch
 #   text only         83.6% / 96.3   83.6% / 91.8
 #   image turn         0.2% / 22.4   59.1% / 74.7
 #   text after image   7.4% / 27.4   52.5% / 75.7
@@ -67,7 +70,8 @@ cd "$(dirname "$0")"
 # Raw upstream: an image request ABORTED with `llama_decode(ctx_dft) rc=-1`.
 # A multimodal target batch is M-RoPE and an image span repeats one temporal
 # position, which the draft context rejected as non-consecutive.
-# The PR head's own f5a7ec15 makes the draft M-RoPE and passes 4 position rows.
+# Upstream f5a7ec15 (came in with #27342) makes the draft M-RoPE and passes 4
+# position rows.
 # That stops the abort but is only HALF a fix: draft() still bases its noise
 # block on dp.n_past, the TOKEN count, while the draft cache runs on the
 # POSITION scale. An N-row image is N tokens but only ~grid_height positions,
@@ -78,9 +82,10 @@ cd "$(dirname "$0")"
 # zero-feature encoder rows, and draft() bases the noise block on the draft
 # cache's own pos_max + 1. Look for one `zero-filled N draft-cache hole rows`
 # per image in the log -- that is the fix working, not a problem.
-# Their diff does NOT apply as-is: their base predates the PR's process()
-# refactor. All three hunks were re-authored, and f5a7ec15's M-RoPE handling
-# was kept inside the zero-fill path so the patch works with either draft gguf.
+# Their diff does NOT apply as-is: their base predates the process()
+# refactor that #27342 brought in. All three hunks were re-authored, and
+# f5a7ec15's M-RoPE handling was kept inside the zero-fill path so the patch
+# works with either draft gguf.
 #
 # DRAFT GGUF: either file works now. The -mrope one below is converted locally
 # and carries dflash.rope.dimension_sections; the published GGUFs do not (see

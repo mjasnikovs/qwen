@@ -18,18 +18,30 @@ ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VER
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
 # Pin to an upstream master commit; override at build time if needed.
-# a130532a == release tag b10605 (2026-08-24), 17 commits past b10588.
+# ca3d5a3e == release tag b10665 (2026-08-28), 60 commits past b10605.
 # Reviewed the whole range; nothing lands on this box's hot paths.
+# The headline of this bump: DFlash2 IS NOW UPSTREAM -- see the clone RUN below.
 # Worth watching on the first run:
-#  - #27594 mtmd: pillow-accurate resize algo, corrected for all models. This
-#    CHANGES image preprocessing, so vision output can differ from b10588.
-#  - #27574 tensor-parallel meta split-state fix. We run -sm layer, so this is
-#    only relevant if we ever try -sm tensor again (we won't, it lost).
-#  - #27573 CUDA POOL_1D support.
-# The rest is webui tabs, CI, tests, DeepSeek/GLM/mamba2 model work.
+#  - #27342 landed as b10f9ca5 (squashed via #27816). Two commits that were not
+#    in the old DFLASH_REF f7aadef0 are now in: 11f45ed3 "Fix graph number
+#    calculation" and 2f3923bc "rename hid and unary". Re-measure DFlash2
+#    acceptance on text and on images before trusting the old numbers.
+#  - #27762 llama: token ID tracking in KV cells. Adds a token field to the
+#    per-cell `ext` struct, and now fills `ext` for plain token batches too --
+#    previously it was M-RoPE-only. Host RAM, not VRAM, but it touches the same
+#    2D-position bookkeeping the DFlash draft cache rides on.
+#  - #27711 spec: synthetic speculative-acceptance options. Benchmark-only, but
+#    it edits common/speculative.cpp, which is where our patch lands.
+#  - #24124 server --kv-unified-per-slot (ctx-per-slot). Relevant to
+#    run-Q3.6-27B-parallel.sh if we ever want per-slot context isolation.
+#  - #27659 gguf-py now maps generation_config.json `repetition_penalty` into
+#    GGUF metadata. Conversion-time only, so it affects any model re-converted
+#    from here on -- including the local DFlash2 draft. Penalties wreck spec
+#    decode acceptance, so check what a fresh convert bakes in.
+# The rest is webui, CI, Vulkan/Metal/HIP/hexagon backends, and model work.
 ARG LLAMA_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_BRANCH=master
-ARG LLAMA_REF=a130532ae1c4c54daaae5527795f5b19c184f269
+ARG LLAMA_REF=ca3d5a3e10d53f7ea672cb9b6178faca3e2807bc
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
@@ -49,8 +61,6 @@ ARG LLAMA_BRANCH
 ARG LLAMA_REF
 ARG CUDA_DOCKER_ARCH
 ARG BUILD_JOBS
-ARG DFLASH_PR
-ARG DFLASH_REF
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake ninja-build git ca-certificates \
@@ -74,18 +84,22 @@ ENV CCACHE_DIR=/ccache \
 
 WORKDIR /src
 # ONE image, not two. The old Dockerfile.dflash2 existed only because DFlash2
-# lives in an unmerged PR. Instead of a second image we merge that PR into the
-# pinned upstream ref, so this single build serves every run script:
-#   - DFlash2 is opt-in at runtime (--spec-type draft-dflash). Nothing else in
-#     the binary changes, so the non-DFlash runs are unaffected.
-#   - PR #27342 is still OPEN. Its head moved to f7aadef0 (14 commits, last
-#     2026-08-24): the two new commits over 64f765f5 are f5a7ec15 "Apply patch
-#     to fix the mrope bug" and f7aadef0 "fix ci". The merge into b10605 is
-#     clean (verified 2026-08-25, no conflicts).
+# lived in an unmerged PR, and this file used to merge that PR into the pinned
+# upstream ref at clone time.
 #
-# patches/0001-dflash-mtmd-zero-fill-draft-cache.patch is the COMPLETE vision
-# fix from upstream issue #27408 (@fishlikeX, fork commit 3e008b22, never turned
-# into a PR). The PR head's own f5a7ec15 is only half of it -- see VISION in
+# NO LONGER. PR #27342 LANDED UPSTREAM on 2026-08-27 as b10f9ca5 (squashed via
+# #27816), which is an ancestor of LLAMA_REF. The DFLASH_PR/DFLASH_REF args and
+# the `git fetch pull/.../head && git merge` step are therefore GONE -- the
+# clone is plain upstream at LLAMA_REF plus patches/. Do not add the merge back.
+# DFlash2 stays opt-in at runtime (--spec-type draft-dflash), so nothing about
+# the non-DFlash runs changes.
+#
+# STILL PATCHED, though: patches/0001-dflash-mtmd-zero-fill-draft-cache.patch is
+# the COMPLETE vision fix from upstream issue #27408 (@fishlikeX, fork commit
+# 3e008b22, never turned into a PR). Issue #27408 is STILL OPEN and none of the
+# zero-fill code is in upstream master -- what landed with #27342 is only
+# f5a7ec15, which is half of it. Verified against b10665 on 2026-08-28: the
+# patch applies clean, 4 hunks, offset +18 lines. See VISION in
 # run-Q3.8-27B-NVFP4.sh and patches/README.md.
 # History: patches/0001-dflash-dense-inject-pos-for-vision.patch was @Shamish's
 # community workaround. It renumbered the DFlash inject batch densely from the
@@ -109,16 +123,12 @@ WORKDIR /src
 # see models/hf/ and the note in patches/README.md. If you ever swap in a
 # downloaded DFlash2 GGUF, check for dflash.rope.dimension_sections first.
 #
-# On every LLAMA_REF or PR bump: re-check that the merge is clean.
-# Drop DFLASH_PR entirely once the PR lands upstream.
-ARG DFLASH_PR=27342
-ARG DFLASH_REF=f7aadef0932e47d66a4349245957e81126a7c734
+# On every LLAMA_REF bump: re-check that patches/ still applies. It is inside
+# the `&&` chain on purpose, so a stale patch fails the build loudly.
+# Drop patches/ and the `git apply` line once #27408 lands upstream.
 COPY patches/ /patches/
 RUN git clone --filter=blob:none --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" . \
     && git checkout "${LLAMA_REF}" \
-    && git fetch origin "pull/${DFLASH_PR}/head" \
-    && git -c user.email=build@local -c user.name=build \
-           merge --no-edit "${DFLASH_REF}" \
     && git apply --verbose /patches/*.patch \
     && git log -1 --format='build commit: %H %s'
 
