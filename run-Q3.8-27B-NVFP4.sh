@@ -22,16 +22,23 @@ cd "$(dirname "$0")"
 # block in one pass and keeps top candidates per position.
 #
 # DFlash2 IS UPSTREAM NOW. PR #27342 landed 2026-08-27 as b10f9ca5 (squashed
-# via #27816) and is an ancestor of LLAMA_REF (b10665). The Dockerfile no longer
+# via #27816) and is an ancestor of LLAMA_REF (b10734). The Dockerfile no longer
 # fetches or merges that PR -- it is plain upstream plus patches/. The image
 # still carries ONE local patch, the #27408 vision zero-fill; see VISION.
-# NOTE: the merged commit includes 11f45ed3 "Fix graph number calculation" and
-# 2f3923bc "rename hid and unary", which were NOT in the old pinned PR head
-# f7aadef0. Every acceptance and tok/s number below predates them. Re-measure.
 # llama-turboquant:cuda is that build.
-# Roll back with IMAGE=llama-turboquant:prev-dflash2 (the last two-image build),
-# or IMAGE=llama-turboquant:prev plus the old --spec-type draft-mtp,ngram-mod
-# block (see git history).
+# Roll back with IMAGE=llama-turboquant:prev (b10665, same flags -- A/B'd
+# 2026-09-01 and identical, see below), IMAGE=llama-turboquant:prev-dflash2
+# (the last two-image build), or the old --spec-type draft-mtp,ngram-mod block
+# (see git history).
+#
+# b10665 -> b10734 A/B, 2026-09-01, same flags, same prompts, temp 0:
+#   text 55.2 vs 51.5 tok/s, image 54.4 vs 55.7, text-after-image 46.9 vs 44.5,
+#   and the draft counts are BYTE-IDENTICAL on both builds (258/560, 201/389,
+#   176/488). #27621 (CUDA MOE fusion extended to spec decode) looked like a
+#   win on paper and delivered nothing here. Do not re-walk it.
+#   These are cold single runs on a synthetic prose prompt, NOT comparable to
+#   the vision table below (different prompts and harness) -- compare columns
+#   within a table, never across.
 #
 # ngram-mod DOES chain onto draft-dflash -- it contributed 11% of accepted
 # tokens (draft positions 4+, past DFlash2's 4-wide block) and cost nothing:
@@ -52,8 +59,11 @@ cd "$(dirname "$0")"
 #
 # VISION
 # ------
-# FIXED 2026-08-25. Images now speculate properly. Measured on this box,
-# temp 0, 2898x1068 png (~2.9k image tokens, 91-position span), ctx 120000:
+# FIXED 2026-08-25, still working at b10734 (re-verified 2026-09-01: the log
+# line `zero-filled 91 draft-cache hole rows` appears once per image, 51.7%
+# accept on the image turn, correct description, zero decode errors).
+# Measured on this box, temp 0, 2898x1068 png (~2.9k image tokens,
+# 91-position span), ctx 120000:
 #
 #                     f5a7ec15 only  + #27408 patch
 #   text only         83.6% / 96.3   83.6% / 91.8
@@ -86,6 +96,11 @@ cd "$(dirname "$0")"
 # refactor that #27342 brought in. All three hunks were re-authored, and
 # f5a7ec15's M-RoPE handling was kept inside the zero-fill path so the patch
 # works with either draft gguf.
+# RE-AUTHORED AGAIN 2026-09-01 for b10734: upstream #27310 fused the DFlash
+# encoder into the KV injection, deleting the separate llama_encode call and
+# the features_buf staging vector, so the gap-fill hunk is now a memset of
+# batch_inject.embd plus one llama_decode. Any future bump touching
+# common_speculative_impl_draft_dflash::process() will break it again.
 #
 # DRAFT GGUF: either file works now. The -mrope one below is converted locally
 # and carries dflash.rope.dimension_sections; the published GGUFs do not (see

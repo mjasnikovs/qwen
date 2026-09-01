@@ -14,13 +14,23 @@ build args are gone from the `Dockerfile`. Do not add them back.
 
 The complete vision fix from upstream issue #27408 (@fishlikeX, fork commit
 `3e008b22`, never opened as a PR). It zero-fills the holes that skipped mtmd
-image chunks leave in the DFlash draft KV cache, via the same encode+inject path
-with all-zero features, so the draft and target caches stay position-aligned.
+image chunks leave in the DFlash draft KV cache, via the same inject path with
+all-zero features, so the draft and target caches stay position-aligned.
 
 **Still needed at `LLAMA_REF`.** Issue #27408 is still open and none of the
 zero-fill code is in upstream master — what came in with #27342 is only
-`f5a7ec15`, which is half of it (see below). Re-verified against `b10665` on
-2026-08-28: applies clean, 4 hunks, offset +18 lines.
+`f5a7ec15`, which is half of it (see below). A third reporter confirmed the
+fix on 2026-08-30 (Vulkan/RDNA4 as well as CUDA), still with no PR.
+
+**Re-authored 2026-09-01 for `b10734`.** Upstream #27310 (`662a0b01`, "spec:
+fuse the DFlash encoder into the KV cache injection") deleted the separate
+`llama_encode` step and the `features_buf` staging vector: `batch_inject` now
+carries raw target features (`n_embd_enc`, sized by `n_ubatch`) and
+`llama_decode` runs the encoder itself. The gap-fill hunk was rewritten to
+match — it is now a `memset` of `batch_inject.embd` plus one `llama_decode`
+per ubatch, no encode call and no scratch buffer. The other three hunks are
+unchanged. Verified against a pristine `b10734` tree: applies clean, 4 hunks,
+no fuzz.
 
 Drop this patch, the `COPY patches/` line and the `git apply` line once #27408
 lands upstream.

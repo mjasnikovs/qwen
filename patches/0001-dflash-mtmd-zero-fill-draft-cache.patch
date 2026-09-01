@@ -1,8 +1,8 @@
 diff --git i/common/speculative.cpp w/common/speculative.cpp
-index 5cc6b4700..0dfeecffd 100644
+index 851a47b..e4da19e 100644
 --- i/common/speculative.cpp
 +++ w/common/speculative.cpp
-@@ -1064,11 +1064,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1079,11 +1079,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              return;
          }
  
@@ -21,7 +21,7 @@ index 5cc6b4700..0dfeecffd 100644
          }
      }
  
-@@ -1088,6 +1092,21 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1103,6 +1107,21 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              return true;
          }
  
@@ -43,13 +43,15 @@ index 5cc6b4700..0dfeecffd 100644
          const int32_t n_tokens = batch_in.n_tokens;
  
          // per-seq inclusive batch range (assumes each seq's tokens are contiguous in the batch)
-@@ -1116,6 +1135,81 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1131,6 +1150,50 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              }
              const int32_t n_rows = i_batch_end[seq_id] - i_batch_beg[seq_id] + 1;
  
 +            // Zero-feature rows for positions [pos_max + 1, first_pos) left by
 +            // skipped mtmd chunks (or by cache-reuse prefixes the draft never
-+            // saw). Same encode+inject path, all-zero features.
++            // saw). Same fused inject path as below, all-zero target features:
++            // since ggml-org#27310 llama_decode(batch_inject) runs the DFlash
++            // encoder itself, so there is no separate llama_encode step.
 +            {
 +                auto * mem_dft = llama_get_memory(ctx_dft);
 +                const llama_pos pos_max   = llama_memory_seq_pos_max(mem_dft, seq_id);
@@ -59,41 +61,9 @@ index 5cc6b4700..0dfeecffd 100644
 +                for (int32_t off = 0; off < gap; off += n_ubatch) {
 +                    const int32_t n_fill = std::min(n_ubatch, gap - off);
 +
-+                    features_buf.assign((size_t) n_fill * n_embd_enc, 0.0f);
-+
-+                    std::vector<llama_pos> enc_pos_fill;
-+                    if (is_mrope) {
-+                        enc_pos_fill.resize((size_t) 4 * n_fill);
-+                        for (int32_t i = 0; i < n_fill; ++i) {
-+                            const llama_pos p = pos_max + 1 + off + i;
-+                            enc_pos_fill[0 * n_fill + i] = p;
-+                            enc_pos_fill[1 * n_fill + i] = p;
-+                            enc_pos_fill[2 * n_fill + i] = p;
-+                            enc_pos_fill[3 * n_fill + i] = 0;
-+                        }
-+                    }
-+
-+                    llama_batch enc_batch = {
-+                        /*.n_tokens =*/ n_fill,
-+                        /*.token    =*/ nullptr,
-+                        /*.embd     =*/ features_buf.data(),
-+                        /*.pos      =*/ is_mrope ? enc_pos_fill.data() : nullptr,
-+                        /*.n_seq_id =*/ nullptr,
-+                        /*.seq_id   =*/ nullptr,
-+                        /*.logits   =*/ nullptr,
-+                    };
-+
-+                    if (llama_encode(ctx_dft, enc_batch) != 0) {
-+                        LOG_ERR("%s: llama_encode(ctx_dft) gap-fill failed (seq=%d, off=%d)\n",
-+                                __func__, (int) seq_id, (int) off);
-+                        return false;
-+                    }
-+
-+                    const float * inp_g = llama_get_embeddings_nextn(ctx_dft);
-+                    GGML_ASSERT(inp_g && "DFlash gap-fill encoder produced no output.");
-+
 +                    batch_inject.n_tokens = n_fill;
-+                    std::memcpy(batch_inject.embd, inp_g, (size_t) n_fill * n_embd_dec * sizeof(float));
++                    std::memset(batch_inject.embd, 0, (size_t) n_fill * n_embd_enc * sizeof(float));
++
 +                    for (int32_t i = 0; i < n_fill; ++i) {
 +                        const llama_pos p = pos_max + 1 + off + i;
 +                        batch_inject.pos[i] = p;
@@ -112,7 +82,6 @@ index 5cc6b4700..0dfeecffd 100644
 +                                __func__, (int) seq_id, (int) off, (int) gap);
 +                        return false;
 +                    }
-+                    llama_synchronize(ctx_dft);
 +                }
 +
 +                if (gap > 0) {
@@ -125,7 +94,7 @@ index 5cc6b4700..0dfeecffd 100644
              for (int32_t offset = 0; offset < n_rows; offset += n_ubatch) {
                  const int32_t n_chunk = std::min(n_ubatch, n_rows - offset);
  
-@@ -1213,7 +1307,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1191,7 +1254,15 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
  
              common_sampler_reset(smpls[seq_id].get());
  

@@ -18,30 +18,28 @@ ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VER
 ARG BASE_CUDA_RUN_CONTAINER=nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
 
 # Pin to an upstream master commit; override at build time if needed.
-# ca3d5a3e == release tag b10665 (2026-08-28), 60 commits past b10605.
-# Reviewed the whole range; nothing lands on this box's hot paths.
-# The headline of this bump: DFlash2 IS NOW UPSTREAM -- see the clone RUN below.
-# Worth watching on the first run:
-#  - #27342 landed as b10f9ca5 (squashed via #27816). Two commits that were not
-#    in the old DFLASH_REF f7aadef0 are now in: 11f45ed3 "Fix graph number
-#    calculation" and 2f3923bc "rename hid and unary". Re-measure DFlash2
-#    acceptance on text and on images before trusting the old numbers.
-#  - #27762 llama: token ID tracking in KV cells. Adds a token field to the
-#    per-cell `ext` struct, and now fills `ext` for plain token batches too --
-#    previously it was M-RoPE-only. Host RAM, not VRAM, but it touches the same
-#    2D-position bookkeeping the DFlash draft cache rides on.
-#  - #27711 spec: synthetic speculative-acceptance options. Benchmark-only, but
-#    it edits common/speculative.cpp, which is where our patch lands.
-#  - #24124 server --kv-unified-per-slot (ctx-per-slot). Relevant to
-#    run-Q3.6-27B-parallel.sh if we ever want per-slot context isolation.
-#  - #27659 gguf-py now maps generation_config.json `repetition_penalty` into
-#    GGUF metadata. Conversion-time only, so it affects any model re-converted
-#    from here on -- including the local DFlash2 draft. Penalties wreck spec
-#    decode acceptance, so check what a fresh convert bakes in.
-# The rest is webui, CI, Vulkan/Metal/HIP/hexagon backends, and model work.
+# d5d993a0 == release tag b10734 (2026-09-01), 76 commits past b10665.
+# Reviewed the whole range. Three commits land on this box's hot paths:
+#  - #27310 spec: fuse the DFlash encoder into the KV cache injection
+#    (662a0b01). llama_decode(batch_inject) now runs the DFlash encoder itself,
+#    so the separate llama_encode + features_buf staging is GONE, and
+#    batch_inject carries raw target features (n_embd_enc, sized by n_ubatch)
+#    instead of encoder output. This rewrote the exact function patches/ edits.
+#    The zero-fill patch was RE-AUTHORED against it on 2026-09-01: the gap fill
+#    is now a memset of batch_inject.embd plus one llama_decode, no encode step.
+#  - #27621 CUDA: MOE fusion extended to speculative decode. MOE glu and
+#    topk-router fusion were restricted to 1 token; they now run for the
+#    multi-token verification batch. This box is a MoE target with spec decode,
+#    so this is the bump's one plausible decode win. Measure it.
+#  - #28000 dflash: pass missing NVFP4 scales to the Q/K/V/output projections.
+#    Affects NVFP4 *draft* models only -- this box drafts Q4_K_M, so no effect.
+# In range but off our paths: #27967 (Hadamard copy guard on context shift),
+# #28011 / #27991 (kv-cells scan, non-contiguous cell restore), e4b9af00 (CUDA
+# flash-attn K/V smem XOR swizzle). The rest is Metal/Vulkan/SYCL/HIP, webui
+# and CI. Issue #27408 is STILL OPEN; the vision patch is still ours to carry.
 ARG LLAMA_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_BRANCH=master
-ARG LLAMA_REF=ca3d5a3e10d53f7ea672cb9b6178faca3e2807bc
+ARG LLAMA_REF=d5d993a0938ddc0d2a4328632b8dcfbfa64b63e6
 
 # CUDA archs to build for. Override e.g. with --build-arg CUDA_DOCKER_ARCH=89-real
 # (4070/4090 Ada=89, 3090/A100=86/80, H100=90, RTX 50xx Blackwell=120).
