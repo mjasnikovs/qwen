@@ -12,9 +12,17 @@ cd "$(dirname "$0")"
 # Gated attention geometry: 24 Q heads, 4 KV heads, head_dim 256 (= 2x128, so
 # q8_0 / f16 KV are block-compatible).
 #
-# UD-Q4_K_XL is 17.9GB on disk vs 15.7GB for the old NVFP4 27B, i.e. ~2.2GB less
-# VRAM left for KV. Context therefore starts at 100k, not 120k. Raise it only
-# after checking idle VRAM headroom -- see the Qwen3.6-27B KV tuning notes.
+# UD-Q4_K_XL read from the GGUF header 2026-09-02: 17.55 GB of tensors, mostly
+# Q5_K (7.9 GB) + IQ4_XS/Q4_K (6.2 GB) + Q6_K (2.9 GB). output.weight is Q6_K
+# (1.04 GB) and token_embd Q4_K (0.72 GB) -- both far smaller than the BF16
+# pair in the NVFP4 VERY-HIGH file, so the whole file is ~2.1 GB SMALLER than
+# NVFP4. The backbone itself is ~2.1 GB bigger, and the backbone is what gets
+# split across the two cards, which is why --tensor-split differs from the
+# NVFP4 script (see DFLASH2 below).
+#
+# Settings are a copy of run-Q3.8-27B-NVFP4.sh (DFlash2 sidecar + ngram-mod,
+# reasoning-effort medium, same KV/batch/sampler flags). Only the model files
+# and --tensor-split differ. Read that script for the DFlash2 and vision notes.
 #
 # THINKING IS ON AND STAYS ON
 # ---------------------------
@@ -63,46 +71,63 @@ cd "$(dirname "$0")"
 #     preset per request (temp 0.7, top_p 0.80, presence_penalty 1.5), otherwise
 #     it runs non-thinking decoding on thinking-tuned sampling.
 #
-# MTP SPECULATIVE DECODING -- RE-ENABLED ON b10453, STILL ON PROBATION
-# --------------------------------------------------------------------
-# This was removed after the MTP draft path aborted in `common_speculative_draft`
-# ("Aborted (core dumped)"), the container silently restarting under
-# --restart=unless-stopped so it looked like a hung agent. The crash rate tracked
-# thinking: 0 crashes across 40 thinking-off trials, then 6/20, 12/20, 20/20 once
-# thinking was on. Old flags also carried ngram-mod:
-#   --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3
-#   --spec-ngram-mod-n-match 24 --spec-ngram-mod-n-min 4 --spec-ngram-mod-n-max 48
+# DFLASH2 SPECULATIVE DECODING (replaces the baked-in MTP head, 2026-09-02)
+# ----------------------------------------------------------------------
+# Same drafting stack as run-Q3.8-27B-NVFP4.sh: the DFlash2 sidecar
+# (Qwen3.8-27B-DFlash2-Q4_K_M-mrope.gguf, locally converted, 1.14 GB) with
+# ngram-mod chained on. MTP alone measured 63.7 code / 40.4 prose on this box
+# vs 93.1 / 57.4 for DFlash2 n-max 4, so draft-mtp is gone from this script.
+# The old `--spec-type draft-mtp --spec-draft-n-max 3` block is in git history.
 #
-# What changed, and why the config below is narrower than the old one:
+# The MTP head (blk.64.nextn.*, IQ4/Q6_K, ~0.4 GB) is still in the GGUF and
+# still loaded; llama.cpp has no flag to skip it.
 #
-#   - ngram-mod is NOT restored. Upstream #21815 (open) is a GGML_ABORT from stale
-#     speculative ngram state after a context shift. Thinking-on means long traces
-#     and context growth, which is exactly when that fires -- the same correlation
-#     the crash data shows. MTP alone halves the abort surface. If the abort
-#     returns with MTP only, ngram was never the cause and MTP is the bug.
-#   - --split-mode layer must stay. Upstream #25522 is MTP crashing on multi-GPU
-#     when -sm tensor cuts a 1-KV-head layer; -sm layer is the accepted
-#     workaround. This script already used layer, so #25522 is NOT our crash.
-#     (Separately, -sm tensor was measured a loss on this box anyway.)
-#   - n-max 3 is upstream's default and the measured optimum. PR #27173 benchmarks
-#     this exact model (Qwen3.8-27B, draft-mtp, temp 0) and reports depth 3 best on
-#     stock upstream; depth 5 only wins with that PR's unmerged chain-draft patch
-#     (LLAMA_SPEC_CHAIN). Still open, still not in LLAMA_REF (re-checked b10665,
-#     2026-08-28). Matches the 35B DFlash result:
-#     small n_max wins, deep drafts are a net loss.
-#   - The draft KV inherits -ctkd/-ctvd q8_0 already set below. Upstream default is
-#     f16, which costs VRAM this box does not have spare.
+# TRIAL LOG 2026-09-02, b10734, ctx 120000, one cold bench.py pass per config
+# (fresh container each time, --restart=no, temp 0). Repeats agree to ~0.5% on
+# decode and ~3% on prefill. Columns: prose / code decode tok/s, 10k prefill.
 #
-# Two open quality/VRAM bugs to watch, neither a crash:
-#   - #25618: draft-mtp on a QUANTIZED target diverges from vanilla under greedy
-#     decode. Target here is UD-Q4_K_XL, so this applies. At --temp 1.0 the
-#     divergence sits under sampling noise, but it is real. Do not assume
-#     spec-decode is lossless here.
-#   - #27155: draft KV cache leaking ~10MB per PP+TG cycle until OOM. Reported for
-#     DSpark, not MTP, but check VRAM after a long session before trusting it.
+#   --tensor-split 37,28 (the 2026-08-21 value)  OOM: 555 MiB draft compute
+#                        buffer on the 4070. This 17.55 GB file is NOT the
+#                        17.9 GB one that was measured then.
+#   39,26 n4 ub512       63.6 / 86.5 / 1543   ~1.0 GB free on each card
+#   40,25 n4 ub512       62.7 / 86.1 / 1542   787 MiB free on the 5070 Ti
+#   n-max 3              63.3 / 82.6 / 1562
+#   n-max 5              66.7 / 89.5 / 1606   <- +5% prose, +3.5% code vs 4
+#   n-max 6              63.8 / 87.4 / 1658
+#   n-max 8              60.3 / 92.0 / 1678   code up, prose (= thinking) down
+#   -ub 256              66.9 / 89.4 / 1764   <- +10% prefill, -500 MiB VRAM
+#   -ub 128              67.1 / 89.5 / 1394
+#   -ub 384              66.9 / 89.6 / 1682
+#   -ub 1024             OOM (1208 MiB compute buffer on the 4070)
+#   -b 4096 (with 256)   65.7 / 89.5 / 1823   +3% prefill, -2% prose: rejected
+#   -b 8192              63.6 / 89.4 / 1845   -5% prose: rejected
+#   -ctkd/-ctvd f16      byte-identical drafts, +110 MiB: no gain
+#   dflash without ngram byte-identical drafts on cold prompts (ngram needs
+#                        generated text to match, kept for warm sessions)
+#   --spec-draft-device  CUDA0 / CUDA1 both OOM at 39,26
+#   37,28 -ub 256        59.0 / 96.8 / 1718   prose -12%: 2 more layers on the
+#   38,27 -ub 256        58.2 / 76.9 / 1607   slower card cost more than the
+#                                            ~1.4 GB it leaves free on the 4070
+#   40,25 -ub 768        58.3 / 95.0 / 1491   worse on every axis
+#   41,24 / 42,23 -ub 1024  OOM (the buffer just moves to the other card)
+#   fill.py 30k/60k/100k/118k on the final config: VRAM flat at 10801 / 14966
+#   MiB (4070 / 5070 Ti), zero errors, 47 tok/s decode at 118k depth.
+#   The ~1.4 GB free on the 4070 at idle is real and stays free at full
+#   context; nothing tested turns it into speed.
 #
-# To roll back, delete the two --spec-* lines. Nothing else depends on them.
-
+# Why 39,26 not 40,25: decode is a wash (bandwidth-bound, 1 layer = <1%), and
+# 40,25 changes the arithmetic enough that temp-0 output diverges, so its
+# numbers are not comparable anyway. 39,26 leaves ~1.5 GB free on the 5070 Ti
+# with -ub 256, which is the vision headroom.
+#
+# Why -ub 256 beats 512 here when 768 lost on NVFP4: two-GPU layer split runs
+# pipeline-parallel across ubatches, and 8 chunks per 2048 batch overlap the
+# cards better than 4. Smaller than 256 and the per-launch overhead wins.
+#
+# For scale, NVFP4 VERY-HIGH on the same build and harness does about
+# 65 / 94 / 1536 (2026-08-28 record), so this file is ~5% behind on code and
+# level on prose and prefill after tuning.
+#
 # No env exports here. Verified 2026-08-24 against the pinned llama.cpp ref:
 #   CUDA_MALLOC_ASYNC_SUPPORTED -- not read by llama.cpp/ggml at all.
 #   GGML_CUDA_FORCE_MMQ         -- compile-time cmake option now, not an
@@ -117,10 +142,11 @@ STATIC_IP="${STATIC_IP:-172.18.0.10}"
 # 65 blocks (64 layers + 1 MTP)
 MODEL_FILE="${MODEL_FILE:-Qwen3.8-27B-UD-Q4_K_XL.gguf}"
 MMPROJ_FILE="${MMPROJ_FILE:-mmproj-Qwen3.8-27B-F16.gguf}"
+DRAFT_FILE="${DRAFT_FILE:-Qwen3.8-27B-DFlash2-Q4_K_M-mrope.gguf}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-999}"
 
 PARALLEL="${PARALLEL:-1}"
-CONTEXT="${CONTEXT:-120000}"
+CONTEXT="${CONTEXT:-140000}"
 
 NAME="${NAME:-llama-turboquant}"
 
@@ -145,6 +171,7 @@ docker create \
     --entrypoint /scripts/entrypoint.sh \
     "${IMAGE}" \
     --model "/models/${MODEL_FILE}" \
+    --model-draft "/models/${DRAFT_FILE}" \
     --mmproj "/models/${MMPROJ_FILE}" \
     --mmproj-offload \
     --image-min-tokens 1024 \
@@ -152,7 +179,7 @@ docker create \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --main-gpu 0 \
     --split-mode layer \
-    --tensor-split 39,27 \
+    --tensor-split 39,26 \
     -fit off \
     --flash-attn on \
     -c "${CONTEXT}" \
@@ -163,12 +190,16 @@ docker create \
     -ctv q8_0 \
     -ctkd q8_0 \
     -ctvd q8_0 \
-    --spec-type draft-mtp \
-    --spec-draft-n-max 3 \
     --load-mode mlock \
     --jinja \
     --reasoning on \
     --reasoning-preserve \
+    --reasoning-effort medium \
+    --spec-type draft-dflash,ngram-mod \
+    --spec-draft-n-max 5 \
+    --spec-ngram-mod-n-match 24 \
+    --spec-ngram-mod-n-min 4 \
+    --spec-ngram-mod-n-max 48 \
     --temp 1.0 \
     --top-p 0.95 \
     --top-k 20 \
@@ -176,7 +207,7 @@ docker create \
     --presence-penalty 0.0 \
     --repeat-penalty 1.0 \
     -b 2048 \
-    -ub 512 \
+    -ub 256 \
     --cache-idle-slots \
     --cache-ram 8192 \
     --threads 8 \
